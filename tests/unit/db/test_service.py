@@ -1,5 +1,7 @@
 import pytest
 import uuid
+import os # Import os for file operations
+import tempfile # Import tempfile
 from datetime import datetime, timezone, timedelta
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock # Import AsyncMock
@@ -11,64 +13,115 @@ from sqlalchemy.orm import sessionmaker
 from scheduling_agent.db.models import Event, EventCreate, Participant, EventUpdate # Import all models needed
 from scheduling_agent.db.service import DatabaseService
 from scheduling_agent.core.exceptions import ConflictError
-from scheduling_agent.db.database import get_async_session as app_get_async_session # Import original
+# Import the get_async_session we want to patch
+import scheduling_agent.db.database as db_module
 from scheduling_agent.core.date_utils import DateUtils
 from scheduling_agent.core.conflict_resolver import ConflictResolver
 
 # --- Test Database Setup ---
-DATABASE_URL_TEST = "sqlite+aiosqlite:///:memory:" # In-memory SQLite for tests
+# DATABASE_URL_TEST = "sqlite+aiosqlite:///:memory:" # Switch from memory
 
-test_engine = create_async_engine(DATABASE_URL_TEST, echo=False, future=True)
-TestAsyncSessionFactory = sessionmaker(
-    bind=test_engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-    autoflush=False,
-    autocommit=False,
-)
+# --- Fixture for Engine and Session Factory (Function Scoped) ---
+@pytest.fixture(scope="function")
+def test_db_setup():
+    """Creates a fresh engine and session factory using a temporary file DB for each test function."""
+    # Create a temporary file for the database
+    temp_db_file = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+    db_path = temp_db_file.name
+    temp_db_file.close() # Close the file handle, we just need the path
+    db_url = f"sqlite+aiosqlite:///{db_path}"
+    print(f"\nUsing test DB: {db_url}") # Debug output
 
-@asynccontextmanager
-async def get_test_async_session() -> AsyncSession:
-    """Async context manager for test sessions."""
-    async with TestAsyncSessionFactory() as session:
+    engine = create_async_engine(db_url, echo=False, future=True)
+    SessionFactory = sessionmaker(
+        bind=engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autoflush=False,
+        autocommit=False,
+    )
+    yield engine, SessionFactory # Provide both to other fixtures/tests
+
+    # --- Cleanup --- #
+    # Remove the temporary database file
+    try:
+        os.remove(db_path)
+        print(f"Cleaned up test DB: {db_path}")
+    except OSError as e:
+        print(f"Error removing test DB file {db_path}: {e}")
+
+# --- Fixture to Create/Drop Tables (Uses function-scoped engine) ---
+@pytest.fixture(scope="function", autouse=True)
+async def setup_test_db(test_db_setup):
+    """Fixture to create and drop tables for each test function using its unique engine."""
+    engine, _ = test_db_setup
+    async with engine.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.create_all)
+    yield # Run the test
+    async with engine.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.drop_all)
+
+# --- Fixture for Test Session (Uses function-scoped factory) ---
+@pytest.fixture(scope="function")
+async def test_session(test_db_setup) -> AsyncSession:
+    """Fixture to provide a test session from the function-scoped factory."""
+    _, SessionFactory = test_db_setup
+    async with SessionFactory() as session:
         try:
             yield session
-            # No auto-commit for tests, assert explicitly if needed
         except Exception:
             await session.rollback()
             raise
         finally:
             await session.close()
 
-@pytest.fixture(scope="function", autouse=True)
-async def setup_test_db():
-    """Fixture to create and drop tables for each test function."""
-    async with test_engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.create_all)
-    yield # Run the test
-    async with test_engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.drop_all)
+# --- Context Manager for Patching (Uses function-scoped factory) ---
+@asynccontextmanager
+async def get_test_async_session_context(test_db_setup):
+    """Context manager that yields sessions from the function-scoped factory."""
+    _, SessionFactory = test_db_setup
+    async with SessionFactory() as session:
+        try:
+            yield session
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
 
-@pytest.fixture(scope="function")
-async def test_session() -> AsyncSession:
-    """Fixture to provide a test session directly for assertions."""
-    async with get_test_async_session() as session:
-        yield session
+# --- Fixture to Patch Global get_async_session --- #
+@pytest.fixture(autouse=True)
+def patch_get_session(monkeypatch, test_db_setup):
+    """Patches the global get_async_session to use the test session factory for the duration of a test."""
+    _, SessionFactory = test_db_setup # Get the factory from test_db_setup
+    @asynccontextmanager
+    async def patched_get_session():
+        # Pass the factory from the outer scope
+        async with get_test_async_session_context(test_db_setup) as session:
+            yield session
 
+    # Patch the get_async_session in the database module
+    monkeypatch.setattr(db_module, "get_async_session", patched_get_session)
+
+# --- Fixture for DB Service (Injects Test Session Factory) ---
 @pytest.fixture
-def db_service_with_mocks() -> tuple[DatabaseService, AsyncMock]:
-    """Fixture to create a DatabaseService instance with a mocked ConflictResolver."""
-    # Create mock dependency
+def db_service_with_mocks(test_db_setup) -> tuple[DatabaseService, AsyncMock]:
+    """Fixture to create a DatabaseService instance with a mocked ConflictResolver
+       and the function-scoped test session factory.
+    """
+    _, SessionFactory = test_db_setup # Get the session factory from the test setup fixture
     mock_conflict_resolver = AsyncMock(spec=ConflictResolver)
-    # Instantiate the service, injecting the mock
-    service = DatabaseService(conflict_resolver=mock_conflict_resolver)
-    # Yield both for use in tests
+    # Instantiate the service, injecting the TEST factory and the mock
+    service = DatabaseService(
+        session_factory=SessionFactory,
+        conflict_resolver=mock_conflict_resolver
+    )
     yield service, mock_conflict_resolver
 
 # --- Test Cases ---
 
 @pytest.mark.asyncio
-async def test_create_event_simple(db_service_with_mocks: tuple[DatabaseService, AsyncMock], test_session: AsyncSession, monkeypatch):
+async def test_create_event_simple(db_service_with_mocks: tuple[DatabaseService, AsyncMock], test_session: AsyncSession):
     """Test creating a simple event with no conflicts."""
     # --- Arrange ---
     db_service, mock_conflict_resolver = db_service_with_mocks
@@ -84,9 +137,6 @@ async def test_create_event_simple(db_service_with_mocks: tuple[DatabaseService,
         time_zone="America/New_York",
         location="Service Conf Room",
     )
-
-    # Patch the service's dependency to use our test session factory
-    monkeypatch.setattr("scheduling_agent.db.service.get_async_session", get_test_async_session)
 
     # --- Act ---
     created_event_db = await db_service.create_event(event_data=event_create_data)
@@ -120,7 +170,7 @@ async def test_create_event_simple(db_service_with_mocks: tuple[DatabaseService,
     assert retrieved_event.participants == []
 
 @pytest.mark.asyncio
-async def test_create_event_with_participants(db_service_with_mocks: tuple[DatabaseService, AsyncMock], test_session: AsyncSession, monkeypatch):
+async def test_create_event_with_participants(db_service_with_mocks: tuple[DatabaseService, AsyncMock], test_session: AsyncSession):
     """Test creating an event with participants and no conflicts."""
     # --- Arrange ---
     db_service, mock_conflict_resolver = db_service_with_mocks
@@ -137,9 +187,6 @@ async def test_create_event_with_participants(db_service_with_mocks: tuple[Datab
         time_zone="Europe/Berlin",
         participant_identifiers=participant_ids
     )
-
-    # Patch the service's dependency
-    monkeypatch.setattr("scheduling_agent.db.service.get_async_session", get_test_async_session)
 
     # --- Act ---
     created_event_db = await db_service.create_event(event_data=event_create_data)
@@ -178,7 +225,7 @@ async def test_create_event_with_participants(db_service_with_mocks: tuple[Datab
     assert event_side_identifiers == sorted(participant_ids)
 
 @pytest.mark.asyncio
-async def test_create_event_conflict(db_service_with_mocks: tuple[DatabaseService, AsyncMock], test_session: AsyncSession, monkeypatch):
+async def test_create_event_conflict(db_service_with_mocks: tuple[DatabaseService, AsyncMock], test_session: AsyncSession):
     """Test that creating an event raises ConflictError when conflicts are detected."""
     # --- Arrange ---
     db_service, mock_conflict_resolver = db_service_with_mocks
@@ -195,9 +242,6 @@ async def test_create_event_conflict(db_service_with_mocks: tuple[DatabaseServic
         end_time=datetime(2024, 6, 3, 11, 0, 0),
         time_zone="UTC",
     )
-
-    # Patch the session factory
-    monkeypatch.setattr("scheduling_agent.db.service.get_async_session", get_test_async_session)
 
     # --- Act & Assert ---
     with pytest.raises(ConflictError) as exc_info:
@@ -217,14 +261,13 @@ async def test_create_event_conflict(db_service_with_mocks: tuple[DatabaseServic
     assert retrieved_event is None
 
 @pytest.mark.asyncio
-async def test_get_event_by_id(db_service_with_mocks: tuple[DatabaseService, AsyncMock], test_session: AsyncSession, monkeypatch):
+async def test_get_event_by_id(db_service_with_mocks: tuple[DatabaseService, AsyncMock], test_session: AsyncSession):
     """Test retrieving an event by its ID."""
     # --- Arrange ---
     db_service, mock_conflict_resolver = db_service_with_mocks
     mock_conflict_resolver.detect_conflicts.return_value = [] # Assume no conflict for creation
 
     # Create an event first using the existing method
-    monkeypatch.setattr("scheduling_agent.db.service.get_async_session", get_test_async_session)
     event_create_data = EventCreate(
         title="Get Me By ID",
         start_time=datetime(2024, 7, 1, 9, 0, 0),
@@ -245,12 +288,11 @@ async def test_get_event_by_id(db_service_with_mocks: tuple[DatabaseService, Asy
     assert retrieved_event.title == "Get Me By ID"
 
 @pytest.mark.asyncio
-async def test_get_event_by_id_not_found(db_service_with_mocks: tuple[DatabaseService, AsyncMock], monkeypatch):
-    """Test retrieving a non-existent event by ID returns None."""
+async def test_get_event_by_id_not_found(db_service_with_mocks: tuple[DatabaseService, AsyncMock]):
+    """Test retrieving a non-existent event by ID."""
     # --- Arrange ---
-    db_service, _ = db_service_with_mocks # Don't need the mock here
+    db_service, _ = db_service_with_mocks
     non_existent_id = uuid.uuid4()
-    monkeypatch.setattr("scheduling_agent.db.service.get_async_session", get_test_async_session)
 
     # --- Act ---
     retrieved_event = await db_service.get_event_by_id(event_id=non_existent_id)
@@ -259,13 +301,11 @@ async def test_get_event_by_id_not_found(db_service_with_mocks: tuple[DatabaseSe
     assert retrieved_event is None
 
 @pytest.mark.asyncio
-async def test_get_events_in_range_simple(db_service_with_mocks: tuple[DatabaseService, AsyncMock], test_session: AsyncSession, monkeypatch):
+async def test_get_events_in_range_simple(db_service_with_mocks: tuple[DatabaseService, AsyncMock], test_session: AsyncSession):
     """Test retrieving simple, non-recurring events within a date range."""
     # --- Arrange ---
     db_service, mock_conflict_resolver = db_service_with_mocks
     mock_conflict_resolver.detect_conflicts.return_value = [] # Assume no conflict for creation
-
-    monkeypatch.setattr("scheduling_agent.db.service.get_async_session", get_test_async_session)
 
     # Events to create
     evt1_start = datetime(2024, 8, 15, 10, 0, 0) # In range
@@ -313,7 +353,7 @@ async def test_get_events_in_range_simple(db_service_with_mocks: tuple[DatabaseS
     assert retrieved_titles == expected_titles
 
 @pytest.mark.asyncio
-async def test_get_events_in_range_recurring(db_service_with_mocks: tuple[DatabaseService, AsyncMock], test_session: AsyncSession, monkeypatch):
+async def test_get_events_in_range_recurring(db_service_with_mocks: tuple[DatabaseService, AsyncMock], test_session: AsyncSession):
     """Test retrieving recurring events within a date range."""
     # --- Arrange ---
     db_service, mock_conflict_resolver = db_service_with_mocks
@@ -380,13 +420,11 @@ async def test_get_events_in_range_recurring(db_service_with_mocks: tuple[Databa
         assert evt.end_time.tzinfo is None
 
 @pytest.mark.asyncio
-async def test_update_event(db_service_with_mocks: tuple[DatabaseService, AsyncMock], test_session: AsyncSession, monkeypatch):
+async def test_update_event(db_service_with_mocks: tuple[DatabaseService, AsyncMock], test_session: AsyncSession):
     """Test updating an existing event."""
     # --- Arrange ---
     db_service, mock_conflict_resolver = db_service_with_mocks
     mock_conflict_resolver.detect_conflicts.return_value = [] # Assume no conflict for creation
-
-    monkeypatch.setattr("scheduling_agent.db.service.get_async_session", get_test_async_session)
 
     # Create initial event
     initial_data = EventCreate(
@@ -432,13 +470,11 @@ async def test_update_event(db_service_with_mocks: tuple[DatabaseService, AsyncM
     assert db_check.notes == "Added some notes."
 
 @pytest.mark.asyncio
-async def test_delete_event(db_service_with_mocks: tuple[DatabaseService, AsyncMock], test_session: AsyncSession, monkeypatch):
+async def test_delete_event(db_service_with_mocks: tuple[DatabaseService, AsyncMock], test_session: AsyncSession):
     """Test deleting an existing event."""
     # --- Arrange ---
     db_service, mock_conflict_resolver = db_service_with_mocks
     mock_conflict_resolver.detect_conflicts.return_value = [] # Assume no conflict for creation
-
-    monkeypatch.setattr("scheduling_agent.db.service.get_async_session", get_test_async_session)
 
     # Create an event to delete
     event_create_data = EventCreate(
@@ -463,11 +499,10 @@ async def test_delete_event(db_service_with_mocks: tuple[DatabaseService, AsyncM
     assert await test_session.get(Event, event_id) is None
 
 @pytest.mark.asyncio
-async def test_delete_event_not_found(db_service_with_mocks: tuple[DatabaseService, AsyncMock], monkeypatch):
+async def test_delete_event_not_found(db_service_with_mocks: tuple[DatabaseService, AsyncMock]):
     """Test deleting a non-existent event returns False."""
     # --- Arrange ---
-    db_service, _ = db_service_with_mocks # Don't need the mock here
-    monkeypatch.setattr("scheduling_agent.db.service.get_async_session", get_test_async_session)
+    db_service, _ = db_service_with_mocks
     non_existent_id = uuid.uuid4()
 
     # --- Act ---
