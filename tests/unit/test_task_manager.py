@@ -34,7 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 def mock_nlp_processor() -> AsyncMock:
     # Add date_utils mock if needed by TaskManager init process
     mock = AsyncMock(spec=NLPProcessor)
-    mock.date_utils = MagicMock()
+    mock.date_utils = MagicMock() 
     return mock
 
 @pytest.fixture
@@ -42,7 +42,7 @@ def mock_db_service() -> AsyncMock:
     # Add minimal spec if needed by __init__
     mock = AsyncMock(spec=DatabaseService)
     # Add date_utils mock if needed by TaskManager init process (e.g., for default exporters)
-    mock.date_utils = MagicMock()
+    mock.date_utils = MagicMock() 
     return mock
 
 @pytest.fixture

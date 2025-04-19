@@ -202,6 +202,46 @@ async def test_unit_parse_scheduling_query_api_error(
     assert result.filters.participants == [] # Check default value
     assert result.confidence == 0.2
 
+
+@pytest.mark.asyncio
+@patch('openai.AsyncClient', new_callable=AsyncMock)
+async def test_unit_parse_scheduling_query_invalid_json(
+    mock_async_client_class: AsyncMock, llm_provider: LLMProvider
+):
+    """Unit test fallback logic when LLM returns syntactically invalid JSON."""
+    query = "Meeting with Bob later"
+
+    # Simulate LLM returning invalid JSON string
+    mock_client_instance = AsyncMock()
+    mock_invalid_response = AsyncMock()
+    mock_choice = AsyncMock()
+    mock_choice.message = AsyncMock()
+    # Malformed JSON (e.g., missing closing brace for date_info)
+    mock_choice.message.content = '{"intent": "create_event", "date_info": {"start_date": "today"'
+    mock_invalid_response.choices = [mock_choice]
+
+    mock_client_instance.chat.completions.create = AsyncMock(
+        return_value=mock_invalid_response
+    )
+    llm_provider.client = mock_client_instance
+
+    # Call the method under test
+    result = await llm_provider.parse_scheduling_query(query)
+
+    # Assertions
+    assert result is not None
+    mock_client_instance.chat.completions.create.assert_awaited_once() # LLM call was attempted
+
+    # Check that the fallback was used
+    assert result.method == "fallback_default"
+    assert result.intent == "unknown"
+    assert result.date_info is not None
+    assert result.date_info.method == "fallback_default"
+    assert result.date_info.start_date is not None # Check presence of date
+    assert result.filters is not None
+    assert result.filters.participants == [] # Check default value
+    assert result.confidence == 0.2
+
 # TODO: Add unit tests for:
 # - LLM returning invalid JSON
 # - Different intents being parsed correctly from mock LLM response

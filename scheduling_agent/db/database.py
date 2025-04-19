@@ -104,3 +104,8 @@ async def initialize_database(engine: AsyncEngine):
 #         result = await session.execute(select(MyModel).where(MyModel.id == 1))
 #         item = result.scalars().first()
 #         return item 
+
+# --- Create engine and session factory instances for import ---
+db_url = get_database_url()
+engine = create_db_engine(db_url)
+async_session_factory = create_session_factory(engine) 

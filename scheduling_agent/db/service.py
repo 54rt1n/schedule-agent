@@ -60,9 +60,16 @@ class DatabaseService:
                 logger.warning("ConflictResolver not available, skipping conflict check.")
 
             # 2. If no conflicts, proceed with creation
-            # Convert EventCreate to dict, exclude fields not in Event, then validate
+            # **Normalize start/end times to naive UTC before validation/saving**
+            start_utc = self.date_utils.normalize_to_utc(event_data.start_time, tz_name=event_data.time_zone)
+            end_utc = self.date_utils.normalize_to_utc(event_data.end_time, tz_name=event_data.time_zone)
+            
             event_dict = event_data.model_dump(exclude_unset=True)
-            event_dict.pop('participant_identifiers', None) # Remove if exists
+            event_dict['start_time'] = start_utc.replace(tzinfo=None) # Store naive UTC
+            event_dict['end_time'] = end_utc.replace(tzinfo=None)   # Store naive UTC
+            event_dict.pop('participant_identifiers', None) # Remove participant list if present
+            
+            # Validate the dictionary with normalized times into the DB model
             db_event = Event.model_validate(event_dict)
 
             session.add(db_event)

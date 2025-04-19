@@ -16,6 +16,10 @@ class ICalExporter(CalendarExporter):
     def __init__(self, date_utils: DateUtils = None):
         self.date_utils = date_utils or DateUtils()
 
+    def get_mime_type(self) -> str:
+        """Returns the MIME type for iCalendar files."""
+        return "text/calendar"
+
     def export(self, events: List[DbEvent], **kwargs: Any) -> str:
         """Exports a list of events to an iCalendar (.ics) string.
 

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, ConfigDict
 from typing import Optional, List, Dict, Any
 
 # --- Schemas for LLM Output Validation ---
@@ -21,6 +21,7 @@ class LLMFilters(BaseModel):
     location: Optional[str] = None
     # Use default_factory for mutable defaults like lists
     participants: Optional[List[str]] = Field(default_factory=list)
+    format: Optional[str] = None # Renamed back to format
 
 class LLMSchedulingParseResult(BaseModel):
     """Pydantic model for the overall LLM scheduling query parsing result."""
@@ -45,14 +46,12 @@ class EventBase(BaseModel):
     rrule: Optional[str] = None
 
 class EventCreate(EventBase):
-    participants: Optional[List[str]] = None
+    participants: Optional[List[str]] = Field(default_factory=list)
 
 class EventRead(EventBase):
-    id: str
-    participants: List[str] = [] # Assume participants are loaded
-    created_at: str
-    updated_at: str
+    id: str = Field(default_factory=str)
+    participants: List[str] = Field(default_factory=list)
+    created_at: str = Field(default_factory=str)
+    updated_at: str = Field(default_factory=str)
 
-    class Config:
-        orm_mode = True # For Pydantic v1
-        # from_attributes = True # For Pydantic v2+ 
+    model_config = ConfigDict(from_attributes=True)

@@ -18,6 +18,7 @@ dependencies = [
   "sqlalchemy[asyncio]>=2.0.22", # Added [asyncio] extra for SQLAlchemy
   "sqlmodel>=0.0.14", # Added SQLModel as per section 3
   "pydantic>=2.4.2",
+  "pydantic-settings", # Added pydantic-settings
   "python-dateutil>=2.8.2",
   "icalendar>=5.0.7",
   "python-dotenv>=1.0.0",

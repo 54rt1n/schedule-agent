@@ -59,14 +59,21 @@ async def test_create_event_simple(db_service: DatabaseService, test_session: As
     # Access the mock via the service if needed for assertions AFTER the call
     # mock_conflict_resolver = db_service.conflict_resolver 
 
-    start_naive_utc = datetime(2024, 6, 1, 10, 0, 0)
-    end_naive_utc = datetime(2024, 6, 1, 11, 0, 0)
+    # Original naive local time for the event
+    local_start = datetime(2024, 6, 1, 10, 0, 0)
+    local_end = datetime(2024, 6, 1, 11, 0, 0)
+    tz_name = "America/New_York"
+
+    # Calculate expected UTC times based on local time and timezone
+    # June 1st in NY is EDT (UTC-4)
+    expected_start_utc = datetime(2024, 6, 1, 14, 0, 0, tzinfo=timezone.utc)
+    expected_end_utc = datetime(2024, 6, 1, 15, 0, 0, tzinfo=timezone.utc)
 
     event_create_data = EventCreate(
         title="Service Test Meeting",
-        start_time=start_naive_utc,
-        end_time=end_naive_utc,
-        time_zone="America/New_York",
+        start_time=local_start, # Pass naive time as per model expectation (service should handle TZ)
+        end_time=local_end,
+        time_zone=tz_name,
         location="Service Conf Room",
     )
 
@@ -90,9 +97,12 @@ async def test_create_event_simple(db_service: DatabaseService, test_session: As
 
     assert retrieved_event is not None
     assert retrieved_event.title == "Service Test Meeting"
-    assert retrieved_event.start_time == start_naive_utc
-    assert retrieved_event.end_time == end_naive_utc
-    assert retrieved_event.time_zone == "America/New_York"
+    # Assert against the expected naive UTC times, as retrieved from DB
+    expected_naive_start_utc = datetime(2024, 6, 1, 14, 0, 0)
+    expected_naive_end_utc = datetime(2024, 6, 1, 15, 0, 0)
+    assert retrieved_event.start_time == expected_naive_start_utc
+    assert retrieved_event.end_time == expected_naive_end_utc
+    assert retrieved_event.time_zone == tz_name
     assert retrieved_event.location == "Service Conf Room"
     assert retrieved_event.rrule is None
     assert retrieved_event.notes is None
@@ -251,89 +261,196 @@ async def test_get_events_in_range_simple(db_service: DatabaseService, test_sess
         EventCreate(title="Evt6", start_time=evt6_start, end_time=evt6_end, time_zone="UTC"),
         EventCreate(title="Evt7", start_time=evt7_start, end_time=evt7_end, time_zone="UTC"),
     ]
-
+    # Use db_service.create_event (which handles conflict check mock)
     created_ids = []
     for data in events_data:
-        evt = await db_service.create_event(event_data=data)
-        created_ids.append(evt.id)
+        # Reset conflict mock for each creation if necessary, or assume it handles it
+        # db_service.conflict_resolver.detect_conflicts.reset_mock()
+        created = await db_service.create_event(event_data=data)
+        created_ids.append(created.id)
 
-    range_start = datetime(2024, 8, 15, 0, 0, 0) # Inclusive start
-    range_end = datetime(2024, 8, 20, 23, 59, 59) # Inclusive end
-
-    # Expected events (must overlap the range)
-    expected_titles = {"Evt1", "Evt2", "Evt5", "Evt6", "Evt7"}
+    # Define the query range (naive UTC)
+    range_start = datetime(2024, 8, 15, 0, 0, 0)
+    range_end = datetime(2024, 8, 21, 0, 0, 0)
 
     # --- Act ---
-    retrieved_events = await db_service.get_events_in_range(start=range_start, end=range_end)
+    # Use aware UTC range for the method call
+    range_start_aware = range_start.replace(tzinfo=timezone.utc)
+    range_end_aware = range_end.replace(tzinfo=timezone.utc)
+    retrieved_events = await db_service.get_events_in_range(start=range_start_aware, end=range_end_aware)
 
     # --- Assert ---
-    assert len(retrieved_events) == len(expected_titles)
-    retrieved_titles = {evt.title for evt in retrieved_events}
-    assert retrieved_titles == expected_titles
+    # Expected events: Evt1, Evt2, Evt5, Evt6, Evt7 (5 total)
+    assert len(retrieved_events) == 5
+    retrieved_titles = sorted([evt.title for evt in retrieved_events])
+    assert retrieved_titles == sorted(["Evt1", "Evt2", "Evt5", "Evt6", "Evt7"])
 
 @pytest.mark.asyncio
 async def test_get_events_in_range_recurring(db_service: DatabaseService, test_session: AsyncSession):
-    """Test retrieving recurring events within a date range."""
+    """Test retrieving recurring event instances within a date range."""
     # --- Arrange ---
-    # mock_conflict_resolver = db_service.conflict_resolver
-    # Mock DateUtils expand_recurrence for consistent results (No longer needed - using real DateUtils)
-    # from scheduling_agent.core.date_utils import DateUtils
-    # db_service.date_utils = DateUtils()
-
-    # Event: Weekly on Tuesday at 11:00 UTC, starting May 7th
-    start_naive_utc = datetime(2024, 5, 7, 11, 0, 0)
-    end_naive_utc = datetime(2024, 5, 7, 11, 30, 0)
-    rrule_str = "FREQ=WEEKLY;BYDAY=TU;UNTIL=20240601T000000Z"
-    base_event = await db_service.create_event(EventCreate(
-        title="Recurring Tue",
-        start_time=start_naive_utc,
-        end_time=end_naive_utc,
+    # Base event: Weekly on Wed at 11:00 UTC for 4 weeks, starting 2024-09-04
+    base_start_naive = datetime(2024, 9, 4, 11, 0, 0)
+    base_end_naive = datetime(2024, 9, 4, 12, 0, 0)
+    rrule_str = "FREQ=WEEKLY;BYDAY=WE;COUNT=4"
+    base_event_data = EventCreate(
+        title="Recurring Weekly",
+        start_time=base_start_naive,
+        end_time=base_end_naive,
         time_zone="UTC",
         rrule=rrule_str
-    ))
+    )
+    # Use db_service to create the base event
+    base_event = await db_service.create_event(event_data=base_event_data)
+    assert base_event.id is not None
 
-    # Create another non-recurring event within the range
-    non_recurring_event = await db_service.create_event(EventCreate(
-        title="One-off May 15th",
-        start_time=datetime(2024, 5, 15, 15, 0, 0),
-        end_time=datetime(2024, 5, 15, 16, 0, 0),
-        time_zone="UTC"
-    ))
-
-    # Define range that includes some but not all recurrences
-    range_start = datetime(2024, 5, 10, 0, 0, 0) # Friday May 10th
-    range_end = datetime(2024, 5, 25, 23, 59, 59) # Saturday May 25th
-
-    # Expected occurrences in range: May 14th, May 21st
-    # Expected events: The two recurring instances + the one-off event
-    expected_count = 3
-    expected_titles = {"Recurring Tue", "One-off May 15th"}
-    # Note: Service should return naive UTC datetimes as stored in DB
-    expected_start_times = {
-        datetime(2024, 5, 14, 11, 0, 0), # Recurring
-        datetime(2024, 5, 21, 11, 0, 0), # Recurring
-        datetime(2024, 5, 15, 15, 0, 0), # One-off
-    }
+    # Define the query range (naive UTC) - should catch 2nd and 3rd instances
+    range_start = datetime(2024, 9, 10, 0, 0, 0) # Tuesday Sep 10th
+    range_end = datetime(2024, 9, 20, 0, 0, 0)   # Friday Sep 20th
 
     # --- Act ---
-    # Pass naive UTC datetimes to the service method
-    retrieved_events = await db_service.get_events_in_range(start=range_start, end=range_end)
+    # Use aware UTC range for the method call
+    range_start_aware = range_start.replace(tzinfo=timezone.utc)
+    range_end_aware = range_end.replace(tzinfo=timezone.utc)
+    retrieved_events = await db_service.get_events_in_range(start=range_start_aware, end=range_end_aware)
 
     # --- Assert ---
-    assert len(retrieved_events) == expected_count
+    # Expected instances: Sep 11th, Sep 18th (2 total)
+    assert len(retrieved_events) == 2
+    retrieved_starts_naive = sorted([evt.start_time for evt in retrieved_events])
 
-    # Check titles and start times (expecting naive UTC)
-    retrieved_titles = {evt.title for evt in retrieved_events}
-    # For this test, recurring instances should keep the base title
-    assert retrieved_titles == expected_titles
+    expected_starts_naive = [
+        datetime(2024, 9, 11, 11, 0, 0),
+        datetime(2024, 9, 18, 11, 0, 0),
+    ]
+    assert retrieved_starts_naive == expected_starts_naive
 
-    retrieved_start_times = {evt.start_time for evt in retrieved_events}
-    assert retrieved_start_times == expected_start_times
+    # Check other properties of the retrieved instances
+    for instance in retrieved_events:
+        assert instance.title == "Recurring Weekly"
+        assert instance.time_zone == "UTC"
+        assert instance.rrule is None # Instances should not have rrule
 
-    # Verify the type of the returned times (should be naive)
-    for evt in retrieved_events:
-        assert evt.start_time.tzinfo is None
-        assert evt.end_time.tzinfo is None
+# --- DST Transition Integration Tests (Phase 3, Task 4) ---
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tz_name, event_local_start, rrule_str, query_range_start_utc, query_range_end_utc, expected_naive_utc_starts",
+    [
+        # US/New York: Spring Forward (EDT starts Sunday, March 10, 2024) - Event at 9am local
+        (
+            "America/New_York",
+            datetime(2024, 3, 8, 9, 0, 0), # Fri 9am EST (naive local)
+            "FREQ=DAILY;COUNT=5", # Fri, Sat, Sun, Mon, Tue
+            datetime(2024, 3, 8, 0, 0, 0, tzinfo=timezone.utc), # Query range start
+            datetime(2024, 3, 13, 0, 0, 0, tzinfo=timezone.utc), # Query range end
+            [ # Expected NAIVE UTC start times stored in DB / returned by service
+                datetime(2024, 3, 8, 14, 0, 0), # Fri 9am EST = 14:00 UTC
+                datetime(2024, 3, 9, 14, 0, 0), # Sat 9am EST = 14:00 UTC
+                datetime(2024, 3, 10, 13, 0, 0), # Sun 9am EDT = 13:00 UTC
+                datetime(2024, 3, 11, 13, 0, 0), # Mon 9am EDT = 13:00 UTC
+                datetime(2024, 3, 12, 13, 0, 0), # Tue 9am EDT = 13:00 UTC
+            ]
+        ),
+        # US/New York: Fall Back (EST starts Sunday, November 3, 2024) - Event at 9am local
+        (
+            "America/New_York",
+            datetime(2024, 11, 1, 9, 0, 0), # Fri 9am EDT (naive local)
+            "FREQ=DAILY;COUNT=5", # Fri, Sat, Sun, Mon, Tue
+            datetime(2024, 11, 1, 0, 0, 0, tzinfo=timezone.utc), # Query range start
+            datetime(2024, 11, 6, 0, 0, 0, tzinfo=timezone.utc), # Query range end
+            [ # Expected NAIVE UTC start times
+                datetime(2024, 11, 1, 13, 0, 0), # Fri 9am EDT = 13:00 UTC
+                datetime(2024, 11, 2, 13, 0, 0), # Sat 9am EDT = 13:00 UTC
+                datetime(2024, 11, 3, 14, 0, 0), # Sun 9am EST = 14:00 UTC
+                datetime(2024, 11, 4, 14, 0, 0), # Mon 9am EST = 14:00 UTC
+                datetime(2024, 11, 5, 14, 0, 0), # Tue 9am EST = 14:00 UTC
+            ]
+        ),
+        # Europe/London: Spring Forward (BST starts Sunday, 31 March 2024) - Event at 9am local
+        (
+            "Europe/London",
+            datetime(2024, 3, 29, 9, 0, 0), # Fri 9am GMT (naive local)
+            "FREQ=DAILY;COUNT=5", # Fri, Sat, Sun, Mon, Tue
+            datetime(2024, 3, 29, 0, 0, 0, tzinfo=timezone.utc), # Query range start
+            datetime(2024, 4, 3, 0, 0, 0, tzinfo=timezone.utc), # Query range end
+            [ # Expected NAIVE UTC start times
+                datetime(2024, 3, 29, 9, 0, 0), # Fri 9am GMT = 09:00 UTC
+                datetime(2024, 3, 30, 9, 0, 0), # Sat 9am GMT = 09:00 UTC
+                datetime(2024, 3, 31, 8, 0, 0), # Sun 9am BST = 08:00 UTC
+                datetime(2024, 4, 1, 8, 0, 0),  # Mon 9am BST = 08:00 UTC
+                datetime(2024, 4, 2, 8, 0, 0),  # Tue 9am BST = 08:00 UTC
+            ]
+        ),
+         # Europe/London: Fall Back (GMT starts Sunday, 27 October 2024) - Event at 9am local
+        (
+            "Europe/London",
+            datetime(2024, 10, 25, 9, 0, 0), # Fri 9am BST (naive local)
+            "FREQ=DAILY;COUNT=5", # Fri, Sat, Sun, Mon, Tue
+            datetime(2024, 10, 25, 0, 0, 0, tzinfo=timezone.utc), # Query range start
+            datetime(2024, 10, 30, 0, 0, 0, tzinfo=timezone.utc), # Query range end
+            [ # Expected NAIVE UTC start times
+                datetime(2024, 10, 25, 8, 0, 0), # Fri 9am BST = 08:00 UTC
+                datetime(2024, 10, 26, 8, 0, 0), # Sat 9am BST = 08:00 UTC
+                datetime(2024, 10, 27, 9, 0, 0), # Sun 9am GMT = 09:00 UTC
+                datetime(2024, 10, 28, 9, 0, 0), # Mon 9am GMT = 09:00 UTC
+                datetime(2024, 10, 29, 9, 0, 0), # Tue 9am GMT = 09:00 UTC
+            ]
+        ),
+    ]
+)
+async def test_get_events_in_range_dst_transitions(
+    db_service: DatabaseService,
+    test_session: AsyncSession, # Use separate session for verification if needed
+    tz_name: str,
+    event_local_start: datetime,
+    rrule_str: str,
+    query_range_start_utc: datetime,
+    query_range_end_utc: datetime,
+    expected_naive_utc_starts: list[datetime]
+):
+    """Verify get_events_in_range retrieves correct naive UTC times across DST."""
+    # Arrange: Create the base recurring event using the db_service
+    event_duration = timedelta(hours=1)
+    event_local_end = event_local_start + event_duration
+    base_event_data = EventCreate(
+        title=f"DST Integration {tz_name}",
+        start_time=event_local_start, # Assume create_event handles naive local correctly based on TZ
+        end_time=event_local_end,
+        time_zone=tz_name, # Store the local timezone
+        rrule=rrule_str
+    )
+    # Create the event using the service (handles conflict mock)
+    created_base_event = await db_service.create_event(event_data=base_event_data)
+    assert created_base_event is not None
+
+    # Act: Call the method under test
+    retrieved_event_instances = await db_service.get_events_in_range(
+        start=query_range_start_utc,
+        end=query_range_end_utc
+    )
+
+    # Assert: Check the naive UTC start times of the returned instances
+    assert len(retrieved_event_instances) == len(expected_naive_utc_starts)
+    retrieved_naive_utc_starts = sorted([evt.start_time for evt in retrieved_event_instances])
+
+    # Debugging output if needed
+    # print(f"\nTZ: {tz_name} - Integration Test")
+    # print("Expected Naive UTC:", [dt.isoformat() for dt in expected_naive_utc_starts])
+    # print("Actual Naive UTC:  ", [dt.isoformat() for dt in retrieved_naive_utc_starts])
+
+    assert retrieved_naive_utc_starts == expected_naive_utc_starts
+
+    # Optional: Verify end times (should also be naive UTC and shifted correctly)
+    retrieved_naive_utc_ends = sorted([evt.end_time for evt in retrieved_event_instances])
+    expected_naive_utc_ends = sorted([start + event_duration for start in expected_naive_utc_starts])
+    assert retrieved_naive_utc_ends == expected_naive_utc_ends
+
+    # Check other instance properties
+    for instance in retrieved_event_instances:
+        assert instance.title == f"DST Integration {tz_name}"
+        assert instance.time_zone == tz_name # Instance keeps original TZ name
+        assert instance.rrule is None # Instances should not have rrule
 
 @pytest.mark.asyncio
 async def test_update_event(db_service: DatabaseService, test_session: AsyncSession):

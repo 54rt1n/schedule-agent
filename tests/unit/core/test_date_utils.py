@@ -258,6 +258,129 @@ def test_expand_recurrence_with_modification(date_utils: DateUtils):
     assert non_mod_instance_data['start_time'] == start_dt # Original start time
     assert non_mod_instance_data['modified_instance_id'] is None
 
+# --- DST Transition Tests (Phase 3, Task 4) ---
+
+@pytest.mark.parametrize(
+    "tz_name, event_local_start, rrule_str, range_start_utc, range_end_utc, expected_utc_starts",
+    [
+        # US/New York: Spring Forward (EDT starts Sunday, March 10, 2024, 2:00 AM EST -> 3:00 AM EDT)
+        (
+            "America/New_York",
+            datetime(2024, 3, 8, 9, 0, 0), # Event starts Friday 9am EST
+            "FREQ=DAILY;COUNT=5", # Fri, Sat, Sun, Mon, Tue
+            datetime(2024, 3, 8, 0, 0, 0, tzinfo=timezone.utc),
+            datetime(2024, 3, 13, 0, 0, 0, tzinfo=timezone.utc),
+            [
+                datetime(2024, 3, 8, 14, 0, 0, tzinfo=timezone.utc), # Fri 9am EST = 14:00 UTC
+                datetime(2024, 3, 9, 14, 0, 0, tzinfo=timezone.utc), # Sat 9am EST = 14:00 UTC
+                datetime(2024, 3, 10, 13, 0, 0, tzinfo=timezone.utc), # Sun 9am EDT = 13:00 UTC
+                datetime(2024, 3, 11, 13, 0, 0, tzinfo=timezone.utc), # Mon 9am EDT = 13:00 UTC
+                datetime(2024, 3, 12, 13, 0, 0, tzinfo=timezone.utc), # Tue 9am EDT = 13:00 UTC
+            ]
+        ),
+        # US/New York: Fall Back (EST starts Sunday, November 3, 2024, 2:00 AM EDT -> 1:00 AM EST)
+        (
+            "America/New_York",
+            datetime(2024, 11, 1, 9, 0, 0), # Event starts Friday 9am EDT
+            "FREQ=DAILY;COUNT=5", # Fri, Sat, Sun, Mon, Tue
+            datetime(2024, 11, 1, 0, 0, 0, tzinfo=timezone.utc),
+            datetime(2024, 11, 6, 0, 0, 0, tzinfo=timezone.utc),
+            [
+                datetime(2024, 11, 1, 13, 0, 0, tzinfo=timezone.utc), # Fri 9am EDT = 13:00 UTC
+                datetime(2024, 11, 2, 13, 0, 0, tzinfo=timezone.utc), # Sat 9am EDT = 13:00 UTC
+                datetime(2024, 11, 3, 14, 0, 0, tzinfo=timezone.utc), # Sun 9am EST = 14:00 UTC
+                datetime(2024, 11, 4, 14, 0, 0, tzinfo=timezone.utc), # Mon 9am EST = 14:00 UTC
+                datetime(2024, 11, 5, 14, 0, 0, tzinfo=timezone.utc), # Tue 9am EST = 14:00 UTC
+            ]
+        ),
+        # Europe/London: Spring Forward (BST starts Sunday, 31 March 2024, 1:00 AM GMT -> 2:00 AM BST)
+        (
+            "Europe/London",
+            datetime(2024, 3, 29, 9, 0, 0), # Event starts Friday 9am GMT
+            "FREQ=DAILY;COUNT=5", # Fri, Sat, Sun, Mon, Tue
+            datetime(2024, 3, 29, 0, 0, 0, tzinfo=timezone.utc),
+            datetime(2024, 4, 3, 0, 0, 0, tzinfo=timezone.utc),
+            [
+                datetime(2024, 3, 29, 9, 0, 0, tzinfo=timezone.utc), # Fri 9am GMT = 09:00 UTC
+                datetime(2024, 3, 30, 9, 0, 0, tzinfo=timezone.utc), # Sat 9am GMT = 09:00 UTC
+                datetime(2024, 3, 31, 8, 0, 0, tzinfo=timezone.utc), # Sun 9am BST = 08:00 UTC
+                datetime(2024, 4, 1, 8, 0, 0, tzinfo=timezone.utc),  # Mon 9am BST = 08:00 UTC
+                datetime(2024, 4, 2, 8, 0, 0, tzinfo=timezone.utc),  # Tue 9am BST = 08:00 UTC
+            ]
+        ),
+        # Europe/London: Fall Back (GMT starts Sunday, 27 October 2024, 2:00 AM BST -> 1:00 AM GMT)
+        (
+            "Europe/London",
+            datetime(2024, 10, 25, 9, 0, 0), # Event starts Friday 9am BST
+            "FREQ=DAILY;COUNT=5", # Fri, Sat, Sun, Mon, Tue
+            datetime(2024, 10, 25, 0, 0, 0, tzinfo=timezone.utc),
+            datetime(2024, 10, 30, 0, 0, 0, tzinfo=timezone.utc),
+            [
+                datetime(2024, 10, 25, 8, 0, 0, tzinfo=timezone.utc), # Fri 9am BST = 08:00 UTC
+                datetime(2024, 10, 26, 8, 0, 0, tzinfo=timezone.utc), # Sat 9am BST = 08:00 UTC
+                datetime(2024, 10, 27, 9, 0, 0, tzinfo=timezone.utc), # Sun 9am GMT = 09:00 UTC
+                datetime(2024, 10, 28, 9, 0, 0, tzinfo=timezone.utc), # Mon 9am GMT = 09:00 UTC
+                datetime(2024, 10, 29, 9, 0, 0, tzinfo=timezone.utc), # Tue 9am GMT = 09:00 UTC
+            ]
+        ),
+    ]
+)
+def test_expand_recurrence_dst_transitions(
+    date_utils: DateUtils,
+    tz_name: str,
+    event_local_start: datetime,
+    rrule_str: str,
+    range_start_utc: datetime,
+    range_end_utc: datetime,
+    expected_utc_starts: list[datetime]
+):
+    """Verify recurrence expansion across DST transitions."""
+    # Arrange: Create base event simulating data from DB (naive UTC times)
+    event_duration = timedelta(hours=1)
+    event_local_end = event_local_start + event_duration
+
+    # Normalize the local start/end times to naive UTC, like create_event does
+    try:
+        start_aware_utc = date_utils.normalize_to_utc(event_local_start, tz_name=tz_name)
+        end_aware_utc = date_utils.normalize_to_utc(event_local_end, tz_name=tz_name)
+        start_naive_utc = start_aware_utc.replace(tzinfo=None)
+        end_naive_utc = end_aware_utc.replace(tzinfo=None)
+    except Exception as e:
+        pytest.fail(f"Failed to normalize test times for tz {tz_name}: {e}")
+
+    base_event = Event.model_validate({
+        "id": uuid.uuid4(),
+        "title": f"DST Test {tz_name}",
+        "start_time": start_naive_utc, # Use normalized naive UTC
+        "end_time": end_naive_utc,     # Use normalized naive UTC
+        "time_zone": tz_name, # Still need original TZ for potential modifications
+        "rrule": rrule_str
+    })
+
+    # Act
+    occurrences = date_utils.expand_recurrence(
+        base_event=base_event,
+        range_start_utc=range_start_utc,
+        range_end_utc=range_end_utc,
+        excluded_dates=[],
+        modified_instances=[]
+    )
+
+    # Assert
+    occurrence_start_times = sorted([occ['start_time'] for occ in occurrences])
+
+    # Debugging output if needed
+    # print(f"\nTZ: {tz_name}")
+    # print("Expected UTC:", [dt.isoformat() for dt in expected_utc_starts])
+    # print("Actual UTC:  ", [dt.isoformat() for dt in occurrence_start_times])
+
+    assert len(occurrence_start_times) == len(expected_utc_starts)
+    assert occurrence_start_times == expected_utc_starts
+
+    # Verify end times also shifted correctly (optional but good)
+    occurrence_end_times = sorted([occ['end_time'] for occ in occurrences])
+    expected_utc_ends = [start + event_duration for start in expected_utc_starts]
+    assert occurrence_end_times == expected_utc_ends
 
 # TODO: Add tests for expand_recurrence with:
 # - Modifications (ModifiedInstance) -> Added test

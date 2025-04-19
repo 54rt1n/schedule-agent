@@ -1,14 +1,19 @@
 from functools import lru_cache
 from unittest.mock import MagicMock, AsyncMock
+from fastapi import Request # Import Request for dependency
 from scheduling_agent.task_manager import SchedulingTaskManager
 from scheduling_agent.core.date_utils import DateUtils
 from scheduling_agent.core.conflict_resolver import ConflictResolver
 from scheduling_agent.core.nlp_processor import NLPProcessor
 from scheduling_agent.core.llm_provider import LLMProvider
 from scheduling_agent.db.service import DatabaseService
+# Import exporter types and instances
+from scheduling_agent.core.exporters.base import CalendarExporter
+from scheduling_agent.core.exporters.ical_exporter import ICalExporter
+from scheduling_agent.core.exporters.orgmode_exporter import OrgModeExporter
 from scheduling_agent.common.types import Task, TaskStatus, TaskState, TaskSendParams, Message, Artifact
 import uuid
-from typing import Optional
+from typing import Optional, Dict
 
 # TODO: Implement proper singleton/factory logic, potentially using app state or lifespan context.
 
@@ -36,42 +41,34 @@ def get_nlp_processor() -> NLPProcessor:
 def get_conflict_resolver() -> ConflictResolver:
     return ConflictResolver(db_service=get_db_service(), date_utils=get_date_utils())
 
-# Task Manager (Primary dependency for RPC)
+# Exporters (Phase 4, Task 2)
 @lru_cache()
-def get_task_manager() -> SchedulingTaskManager:
-    """Dependency function to get the TaskManager instance.
+def get_exporters() -> Dict[str, CalendarExporter]:
+    """Dependency function to get the available exporters."""
+    date_utils = get_date_utils() # Reuse date utils
+    # TODO: Eventually configure which exporters are active via settings
+    return {
+        "ics": ICalExporter(date_utils=date_utils),
+        "org": OrgModeExporter(date_utils=date_utils)
+    }
 
-    TEMPORARY: Returns a mock for testing routing logic.
-    TODO: Correctly instantiate SchedulingTaskManager with its dependencies.
-    """
-    print("WARNING: Returning mock Task Manager for dependency testing!")
-    # Use AsyncMock and configure async methods to return awaitable Task objects
-    mock = AsyncMock(spec=SchedulingTaskManager)
+# Task Manager (Primary dependency for RPC)
+# Remove @lru_cache and mock implementation
+# @lru_cache()
+def get_task_manager(request: Request) -> SchedulingTaskManager:
+    """Dependency function to get the TaskManager instance from app state."""
+    # Retrieve the singleton instance created during lifespan startup
+    task_manager = getattr(request.app.state, "task_manager", None)
+    if task_manager is None:
+        # This should ideally not happen if lifespan context runs correctly
+        print("ERROR: TaskManager instance not found in app state!") # Use logger instead
+        raise RuntimeError("TaskManager not initialized. Check application lifespan.")
+    return task_manager
 
-    # Define functions for mock methods to use the correct task_id
-    async def mock_create(params: TaskSendParams) -> Task:
-        return Task(id=params.id, status=TaskStatus(state=TaskState.WORKING))
-
-    async def mock_complete(task_id: str, message: Message, artifact: Optional[Artifact] = None) -> Task:
-        return Task(id=task_id, status=TaskStatus(state=TaskState.COMPLETED, message=message), artifacts=[artifact] if artifact else [])
-
-    async def mock_fail(task_id: str, message: Message) -> Task:
-        return Task(id=task_id, status=TaskStatus(state=TaskState.FAILED, message=message))
-
-    async def mock_require_input(task_id: str, message: Message, artifact: Optional[Artifact] = None) -> Task:
-        return Task(id=task_id, status=TaskStatus(state=TaskState.INPUT_REQUIRED, message=message), artifacts=[artifact] if artifact else [])
-
-    async def mock_get(task_id: str) -> Optional[Task]:
-        # Return a default task or None for get, depending on test needs
-        # For now, return a basic task for simplicity
-        return Task(id=task_id, status=TaskStatus(state=TaskState.WORKING))
-
-    # Assign the mock methods
-    mock.create_task = AsyncMock(side_effect=mock_create)
-    mock.complete_task = AsyncMock(side_effect=mock_complete)
-    mock.fail_task = AsyncMock(side_effect=mock_fail)
-    mock.require_input_task = AsyncMock(side_effect=mock_require_input)
-    mock.get_task = AsyncMock(side_effect=mock_get)
-
-    return mock
+    # --- REMOVED MOCK IMPLEMENTATION ---
+    # print("WARNING: Returning mock Task Manager for dependency testing!")
+    # # Use AsyncMock and configure async methods to return awaitable Task objects
+    # mock = AsyncMock(spec=SchedulingTaskManager)
+    # ... (rest of mock code removed) ...
+    # return mock
     # raise NotImplementedError("TaskManager singleton/factory not yet implemented.") 

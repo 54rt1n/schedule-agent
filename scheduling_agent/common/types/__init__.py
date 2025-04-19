@@ -130,7 +130,7 @@ class TaskIdParams(BaseModel):
 
 class TaskGetParams(TaskIdParams):
     """Parameters for the 'tasks/get' method."""
-    historyLength: Optional[int] = Field(None, description="Maximum number of state transitions to include in the response.")
+    historyLength: Optional[int] = Field(default=None, ge=0, description="Maximum number of state transitions to include in the response.")
 
 class CancelTaskParams(TaskIdParams):
     """Parameters for the 'tasks/cancel' method."""
