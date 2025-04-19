@@ -6,9 +6,12 @@ from scheduling_agent.core.llm_provider import LLMProvider
 from scheduling_agent.core.date_utils import DateUtils
 from scheduling_agent.core.schemas import LLMSchedulingParseResult, LLMDateInfo, LLMFilters
 
+# Import pytest-asyncio decorator
+import pytest_asyncio
+
 # --- Fixtures ---
 
-@pytest.fixture
+@pytest_asyncio.fixture # Use pytest_asyncio.fixture for async fixtures
 async def mock_llm_provider() -> AsyncMock:
     """Provides an async mock LLMProvider with the primary method mocked."""
     mock = AsyncMock(spec=LLMProvider)
@@ -26,8 +29,8 @@ def mock_date_utils() -> MagicMock:
     # NLPProcessor currently passes DateUtils to LLMProvider but doesn't call methods on it directly.
     return MagicMock(spec=DateUtils)
 
-@pytest.fixture
-def nlp_processor(
+@pytest_asyncio.fixture # Use pytest_asyncio.fixture for async fixtures
+async def nlp_processor(
     mock_llm_provider: AsyncMock, mock_date_utils: MagicMock
 ) -> NLPProcessor:
     """Provides an NLPProcessor instance with mocked dependencies."""
@@ -55,6 +58,7 @@ async def test_parse_successful_llm_response(
     # NLPProcessor receives the model and returns it directly
     result_model = await nlp_processor.parse_natural_language_query(query)
 
+    # Assert on the mock method directly
     mock_llm_provider.parse_scheduling_query.assert_awaited_once_with(query)
 
     # Verify the returned model attributes
@@ -93,6 +97,7 @@ async def test_parse_minimal_llm_response(
 
     result_model = await nlp_processor.parse_natural_language_query(query)
 
+    # Assert on the mock method directly
     mock_llm_provider.parse_scheduling_query.assert_awaited_once_with(query)
 
     # Verify the processor returned the model correctly, including defaults
@@ -138,6 +143,7 @@ async def test_parse_llm_failure_with_fallback(
 
     result_model = await nlp_processor.parse_natural_language_query(query)
 
+    # Assert on the mock method directly
     mock_llm_provider.parse_scheduling_query.assert_awaited_once_with(query)
 
     # Verify the processor returns the fallback model directly
@@ -180,6 +186,7 @@ async def test_parse_total_failure(
 
     result_model = await nlp_processor.parse_natural_language_query(query)
 
+    # Assert on the mock method directly
     mock_llm_provider.parse_scheduling_query.assert_awaited_once_with(query)
 
     # Verify the processor returns the model directly
@@ -212,6 +219,7 @@ async def test_parse_llm_provider_returns_none(
     # Check that calling the processor returns the default failure Pydantic model
     result_model = await nlp_processor.parse_natural_language_query(query)
 
+    # Assert on the mock method directly
     mock_llm_provider.parse_scheduling_query.assert_awaited_once_with(query)
 
     # Check the processor's default failure model attributes
@@ -246,6 +254,7 @@ async def test_parse_llm_provider_raises_exception(
     # Call the processor
     result_model = await nlp_processor.parse_natural_language_query(query)
 
+    # Assert on the mock method directly
     mock_llm_provider.parse_scheduling_query.assert_awaited_once_with(query)
 
     # Check that the processor caught the exception and returned the failure model

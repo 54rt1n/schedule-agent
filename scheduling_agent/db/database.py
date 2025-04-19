@@ -2,7 +2,7 @@ import os
 from typing import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, AsyncEngine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import event
 from sqlmodel import SQLModel # Though not used directly here, needed for metadata later
@@ -16,63 +16,67 @@ load_dotenv()
 
 logger = get_logger(__name__)
 
-# --- Database Configuration ---
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL", "sqlite+aiosqlite:///./schedule_agent.db"
-)
-# Use connect_args for SQLite specific settings
-connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
-
-
-# --- Engine Creation ---
-try:
-    async_engine = create_async_engine(
-        DATABASE_URL,
-        echo=os.environ.get("DB_ECHO", "False").lower() == "true",
-        future=True, # Enables SQLAlchemy 2.0 features
-        connect_args=connect_args,
-        pool_pre_ping=True, # Check connections before use
-        pool_recycle=3600, # Recycle connections after 1 hour
+# --- Database Configuration Function ---
+def get_database_url() -> str:
+    """Gets the database URL from environment variables."""
+    return os.environ.get(
+        "DATABASE_URL", "sqlite+aiosqlite:///./schedule_agent.db"
     )
-    logger.info("Async database engine created successfully", db_url=DATABASE_URL)
-except Exception as e:
-    logger.error("Failed to create database engine", error=str(e), db_url=DATABASE_URL)
-    raise
 
-# --- SQLite WAL Mode Optimization ---
-# Only applicable for SQLite
-if DATABASE_URL.startswith("sqlite"):
+# --- Engine Creation Function ---
+def create_db_engine(db_url: str) -> AsyncEngine:
+    """Creates the SQLAlchemy async engine."""
+    connect_args = {"check_same_thread": False} if db_url.startswith("sqlite") else {}
+    try:
+        engine = create_async_engine(
+            db_url,
+            echo=os.environ.get("DB_ECHO", "False").lower() == "true",
+            future=True,
+            connect_args=connect_args,
+            pool_pre_ping=True,
+            pool_recycle=3600,
+        )
+        logger.info("Async database engine configured", db_url=db_url)
 
-    @event.listens_for(async_engine.sync_engine, "connect")
-    def _enable_wal(dbapi_con, connection_record):
-        """Enable WAL mode for SQLite connections."""
-        cursor = dbapi_con.cursor()
-        try:
-            cursor.execute("PRAGMA journal_mode=WAL;")
-            logger.debug("SQLite WAL mode enabled")
-        except Exception as e:
-            logger.warning("Failed to enable WAL mode for SQLite", error=str(e))
-        finally:
-            cursor.close()
+        # --- SQLite WAL Mode Optimization ---
+        if db_url.startswith("sqlite"):
+            @event.listens_for(engine.sync_engine, "connect")
+            def _enable_wal(dbapi_con, connection_record):
+                cursor = dbapi_con.cursor()
+                try:
+                    cursor.execute("PRAGMA journal_mode=WAL;")
+                    logger.debug("SQLite WAL mode enabled")
+                except Exception as e:
+                    logger.warning("Failed to enable WAL mode for SQLite", error=str(e))
+                finally:
+                    cursor.close()
 
+        return engine
+    except Exception as e:
+        logger.error("Failed to create database engine", error=str(e), db_url=db_url)
+        raise
 
-# --- Session Management ---
-AsyncSessionFactory = sessionmaker(
-    bind=async_engine,
-    class_=AsyncSession,
-    expire_on_commit=False, # Recommended for async use
-    autoflush=False,
-    autocommit=False,
-)
+# --- Session Factory Creation Function ---
+def create_session_factory(engine: AsyncEngine) -> sessionmaker:
+    """Creates the SQLAlchemy session factory."""
+    return sessionmaker(
+        bind=engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autoflush=False,
+        autocommit=False,
+    )
 
+# --- Session Context Manager --- #
 @asynccontextmanager
-async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
-    """Provide a transactional scope around a series of operations."""
-    async with AsyncSessionFactory() as session:
+async def get_async_session(session_factory: sessionmaker) -> AsyncGenerator[AsyncSession, None]:
+    """Provide a transactional scope around a series of operations using the provided factory."""
+    if session_factory is None:
+        raise RuntimeError("Session factory not provided to get_async_session")
+
+    async with session_factory() as session:
         try:
             yield session
-            # Optionally commit here if you want auto-commit behavior
-            # await session.commit()
         except Exception as e:
             logger.error("Session rollback initiated due to error", error=str(e))
             await session.rollback()
@@ -82,14 +86,16 @@ async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
     logger.debug("Async session closed")
 
 
-async def create_db_and_tables():
-    """Create database tables based on SQLModel metadata (call during app startup)."""
-    async with async_engine.begin() as conn:
-        # TODO: Integrate with Alembic later instead of creating tables directly
-        # await conn.run_sync(SQLModel.metadata.create_all)
-        logger.warning("Skipping direct table creation; use Alembic migrations.")
-    logger.info("Database tables check/creation process finished (using Alembic recommended).")
-
+# --- Database Initialization Function (Placeholder for App Startup) --- #
+async def initialize_database(engine: AsyncEngine):
+    """Initialize the database by creating all tables."""
+    # Placeholder: Implement table creation logic (e.g., using SQLModel or Alembic)
+    # logger.info("Database initialization placeholder.")
+    async with engine.begin() as conn:
+        # In a real app, consider Alembic migrations
+        # For simple cases or testing, SQLModel create_all works
+        await conn.run_sync(SQLModel.metadata.create_all)
+    logger.info("Database tables created successfully (if not already present). Using SQLModel.metadata.create_all.")
 
 # Example usage (typically in your service layer or API endpoints):
 # async def some_database_operation():

@@ -159,10 +159,10 @@ class DateUtils:
         excluded_set = {ex.excluded_date.date() for ex in excluded_dates}
         modified_dict = {mod.original_date.date(): mod for mod in modified_instances}
 
-        # Generate occurrences within the range using the parsed rrule
+        # Generate occurrences within the original range using the parsed rrule
         # dateutil.rrule works with aware datetime objects
         instance_datetimes = ruleset.between(
-            range_start_utc,
+            range_start_utc, # Use original start date
             range_end_utc,
             inc=True # Include boundaries
         )
@@ -204,6 +204,7 @@ class DateUtils:
                 occurrence_data['rrule'] = None
                 occurrence_data['modified_instance_id'] = None
 
+            # Append unconditionally (as it was before the last change)
             occurrences.append(occurrence_data)
 
         return occurrences
