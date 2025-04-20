@@ -1,24 +1,25 @@
-import pytest
-import pytest_asyncio
-import httpx
 import uuid
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
+
+import httpx
+import pytest
+
+# Import necessary types
+from scheduling_agent.common.types import (
+    CancelTaskParams,
+    JSONRPCRequest,
+    Message,
+    Part,
+    Task,
+    TaskNotCancelableError,
+    TaskNotFoundError,
+    TaskState,
+    TaskStatus,
+)
 
 # Import fixtures from conftest
 from .conftest import RPC_URL
 
-# Import necessary types
-from scheduling_agent.common.types import (
-    JSONRPCRequest,
-    CancelTaskParams,
-    TaskState,
-    Task,
-    TaskStatus,
-    Message,
-    Part,
-    TaskNotFoundError,
-    TaskNotCancelableError,
-)
 
 @pytest.mark.asyncio
 async def test_cancel_task_success(
@@ -32,17 +33,19 @@ async def test_cancel_task_success(
     # Mock the TaskManager response for successful cancellation
     mock_canceled_task = Task(
         id=task_id,
-        status=TaskStatus(state=TaskState.CANCELED, message=Message(role="agent", parts=[Part(type="text", text="Task canceled by request.")]))
+        status=TaskStatus(
+            state=TaskState.CANCELED,
+            message=Message(
+                role="agent", parts=[Part(type="text", text="Task canceled by request.")]
+            ),
+        ),
     )
     mock_task_manager.cancel_task.return_value = mock_canceled_task
 
     # Prepare the RPC request
     params = CancelTaskParams(id=task_id)
     rpc_request = JSONRPCRequest(
-        jsonrpc="2.0",
-        method="tasks/cancel",
-        params=params.model_dump(),
-        id=request_id
+        jsonrpc="2.0", method="tasks/cancel", params=params.model_dump(), id=request_id
     )
 
     # Action
@@ -61,7 +64,10 @@ async def test_cancel_task_success(
     assert result_task_data.get("status", {}).get("state") == TaskState.CANCELED.value
 
     # Assert mock calls
-    mock_task_manager.cancel_task.assert_awaited_once_with(task_id=task_id) # Ensure keyword arg matches TaskManager if defined that way
+    mock_task_manager.cancel_task.assert_awaited_once_with(
+        task_id=task_id
+    )  # Ensure keyword arg matches TaskManager if defined that way
+
 
 @pytest.mark.asyncio
 async def test_cancel_task_not_found(
@@ -73,15 +79,14 @@ async def test_cancel_task_not_found(
     task_id = str(uuid.uuid4())
 
     # Mock TaskManager to raise TaskNotFoundError
-    mock_task_manager.cancel_task.side_effect = TaskNotFoundError(f"Task with ID '{task_id}' not found for cancellation")
+    mock_task_manager.cancel_task.side_effect = TaskNotFoundError(
+        f"Task with ID '{task_id}' not found for cancellation"
+    )
 
     # Prepare the RPC request
     params = CancelTaskParams(id=task_id)
     rpc_request = JSONRPCRequest(
-        jsonrpc="2.0",
-        method="tasks/cancel",
-        params=params.model_dump(),
-        id=request_id
+        jsonrpc="2.0", method="tasks/cancel", params=params.model_dump(), id=request_id
     )
 
     # Action
@@ -103,6 +108,7 @@ async def test_cancel_task_not_found(
     # Assert mock calls
     mock_task_manager.cancel_task.assert_awaited_once_with(task_id=task_id)
 
+
 @pytest.mark.asyncio
 async def test_cancel_task_not_cancelable(
     async_client: httpx.AsyncClient,
@@ -113,15 +119,14 @@ async def test_cancel_task_not_cancelable(
     task_id = str(uuid.uuid4())
 
     # Mock TaskManager to raise TaskNotCancelableError
-    mock_task_manager.cancel_task.side_effect = TaskNotCancelableError(f"Task {task_id} is in state 'completed' and cannot be canceled.")
+    mock_task_manager.cancel_task.side_effect = TaskNotCancelableError(
+        f"Task {task_id} is in state 'completed' and cannot be canceled."
+    )
 
     # Prepare the RPC request
     params = CancelTaskParams(id=task_id)
     rpc_request = JSONRPCRequest(
-        jsonrpc="2.0",
-        method="tasks/cancel",
-        params=params.model_dump(),
-        id=request_id
+        jsonrpc="2.0", method="tasks/cancel", params=params.model_dump(), id=request_id
     )
 
     # Action
@@ -138,7 +143,9 @@ async def test_cancel_task_not_cancelable(
 
     error_data = response_data["error"]
     assert error_data.get("code") == TaskNotCancelableError.DEFAULT_CODE
-    assert f"Task {task_id} is in state 'completed' and cannot be canceled." in error_data.get("message", "")
+    assert f"Task {task_id} is in state 'completed' and cannot be canceled." in error_data.get(
+        "message", ""
+    )
 
     # Assert mock calls
-    mock_task_manager.cancel_task.assert_awaited_once_with(task_id=task_id) 
+    mock_task_manager.cancel_task.assert_awaited_once_with(task_id=task_id)

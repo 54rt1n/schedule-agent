@@ -1,10 +1,11 @@
+from datetime import UTC, datetime
+
 import pytest
-from datetime import datetime, timezone
 from icalendar import Calendar
 
+from scheduling_agent.core.date_utils import DateUtils
 from scheduling_agent.core.exporters.ical_exporter import ICalExporter
 from scheduling_agent.db.models import Event
-from scheduling_agent.core.date_utils import DateUtils
 
 
 class TestICalExporter:
@@ -25,15 +26,15 @@ class TestICalExporter:
         event = Event(
             id="evt_1",
             title="Simple Event",
-            start_time=datetime(2024, 1, 1, 10, 0, 0, tzinfo=timezone.utc),
-            end_time=datetime(2024, 1, 1, 11, 0, 0, tzinfo=timezone.utc),
+            start_time=datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC),
+            end_time=datetime(2024, 1, 1, 11, 0, 0, tzinfo=UTC),
             is_recurring=False,
             notes="Some notes",
             location="Office",
             participants=[],
             rrule=None,
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
         )
 
         ics_data = exporter.export([event])
@@ -45,17 +46,19 @@ class TestICalExporter:
         except ValueError as e:
             pytest.fail(f"Exported data is not valid iCalendar format: {e}")
 
-        assert len(cal.walk('VEVENT')) == 1
-        exported_event = cal.walk('VEVENT')[0]
+        assert len(cal.walk("VEVENT")) == 1
+        exported_event = cal.walk("VEVENT")[0]
 
-        assert exported_event.get('summary') == "Simple Event"
-        assert exported_event.get('dtstart').dt == datetime(2024, 1, 1, 10, 0, 0, tzinfo=timezone.utc)
-        assert exported_event.get('dtend').dt == datetime(2024, 1, 1, 11, 0, 0, tzinfo=timezone.utc)
-        assert exported_event.get('uid') == "evt_1@scheduling-agent"
-        assert exported_event.get('description') == "Some notes"
-        assert exported_event.get('location') == "Office"
-        assert 'attendee' not in exported_event
-        assert 'rrule' not in exported_event
+        assert exported_event.get("summary") == "Simple Event"
+        assert exported_event.get("dtstart").dt == datetime(
+            2024, 1, 1, 10, 0, 0, tzinfo=UTC
+        )
+        assert exported_event.get("dtend").dt == datetime(2024, 1, 1, 11, 0, 0, tzinfo=UTC)
+        assert exported_event.get("uid") == "evt_1@scheduling-agent"
+        assert exported_event.get("description") == "Some notes"
+        assert exported_event.get("location") == "Office"
+        assert "attendee" not in exported_event
+        assert "rrule" not in exported_event
 
     # TODO: Add more tests:
     # - Event with timezone
@@ -63,4 +66,4 @@ class TestICalExporter:
     # - Recurring event (RRULE)
     # - All-day event (DTSTART/DTEND as DATE)
     # - Multiple events
-    # - Edge cases (e.g., missing optional fields) 
+    # - Edge cases (e.g., missing optional fields)

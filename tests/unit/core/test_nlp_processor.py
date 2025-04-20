@@ -1,17 +1,19 @@
-import pytest
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
-from scheduling_agent.core.nlp_processor import NLPProcessor
-from scheduling_agent.core.llm_provider import LLMProvider
-from scheduling_agent.core.date_utils import DateUtils
-from scheduling_agent.core.schemas import LLMSchedulingParseResult, LLMDateInfo, LLMFilters
+import pytest
 
 # Import pytest-asyncio decorator
 import pytest_asyncio
 
+from scheduling_agent.core.date_utils import DateUtils
+from scheduling_agent.core.llm_provider import LLMProvider
+from scheduling_agent.core.nlp_processor import NLPProcessor
+from scheduling_agent.core.schemas import LLMDateInfo, LLMFilters, LLMSchedulingParseResult
+
 # --- Fixtures ---
 
-@pytest_asyncio.fixture # Use pytest_asyncio.fixture for async fixtures
+
+@pytest_asyncio.fixture  # Use pytest_asyncio.fixture for async fixtures
 async def mock_llm_provider() -> AsyncMock:
     """Provides an async mock LLMProvider with the primary method mocked."""
     mock = AsyncMock(spec=LLMProvider)
@@ -23,21 +25,22 @@ async def mock_llm_provider() -> AsyncMock:
     mock._get_fallback_date_result = AsyncMock(return_value=None)
     return mock
 
+
 @pytest.fixture
 def mock_date_utils() -> MagicMock:
     """Provides a mock DateUtils (currently unused by NLPProcessor)."""
     # NLPProcessor currently passes DateUtils to LLMProvider but doesn't call methods on it directly.
     return MagicMock(spec=DateUtils)
 
-@pytest_asyncio.fixture # Use pytest_asyncio.fixture for async fixtures
-async def nlp_processor(
-    mock_llm_provider: AsyncMock, mock_date_utils: MagicMock
-) -> NLPProcessor:
+
+@pytest_asyncio.fixture  # Use pytest_asyncio.fixture for async fixtures
+async def nlp_processor(mock_llm_provider: AsyncMock, mock_date_utils: MagicMock) -> NLPProcessor:
     """Provides an NLPProcessor instance with mocked dependencies."""
     return NLPProcessor(llm_provider=mock_llm_provider, date_utils=mock_date_utils)
 
 
 # --- Tests for parse_natural_language_query ---
+
 
 @pytest.mark.asyncio
 async def test_parse_successful_llm_response(
@@ -73,7 +76,7 @@ async def test_parse_successful_llm_response(
     assert result_model.date_info.specific_time == "15:00:00"
     assert result_model.date_info.end_time is None
     assert result_model.date_info.is_recurring is False
-    assert result_model.date_info.method is None # Default value
+    assert result_model.date_info.method is None  # Default value
 
     # Verify nested filters attributes
     assert result_model.filters.participants == ["Alice"]
@@ -130,13 +133,13 @@ async def test_parse_llm_failure_with_fallback(
     provider_fallback_model = LLMSchedulingParseResult(
         intent="unknown",
         date_info=LLMDateInfo(
-            start_date="2024-01-02", # Example date
+            start_date="2024-01-02",  # Example date
             end_date="2024-01-02",
             method="fallback_dateparser",
-            confidence=0.6 # Note: date_info confidence isn't used by NLPProcessor
+            confidence=0.6,  # Note: date_info confidence isn't used by NLPProcessor
         ),
-        filters=LLMFilters(), # Default empty filters
-        confidence=0.2, # Overall confidence is low
+        filters=LLMFilters(),  # Default empty filters
+        confidence=0.2,  # Overall confidence is low
         method="fallback_dateparser",
     )
     mock_llm_provider.parse_scheduling_query.return_value = provider_fallback_model
@@ -167,9 +170,7 @@ async def test_parse_llm_failure_with_fallback(
 
 
 @pytest.mark.asyncio
-async def test_parse_total_failure(
-    nlp_processor: NLPProcessor, mock_llm_provider: AsyncMock
-):
+async def test_parse_total_failure(nlp_processor: NLPProcessor, mock_llm_provider: AsyncMock):
     """Test handling the total failure fallback Pydantic model."""
     query = "blargle flibble"
     # This is the Pydantic model LLMProvider returns on total failure
@@ -177,7 +178,9 @@ async def test_parse_total_failure(
     # Let's assume today is 2024-01-01 for consistency
     provider_failure_model = LLMSchedulingParseResult(
         intent="unknown",
-        date_info=LLMDateInfo(start_date="2024-01-01", end_date="2024-01-01", method="fallback_default"),
+        date_info=LLMDateInfo(
+            start_date="2024-01-01", end_date="2024-01-01", method="fallback_default"
+        ),
         filters=LLMFilters(),
         confidence=0.2,
         method="fallback_default",
@@ -207,6 +210,7 @@ async def test_parse_total_failure(
     assert result_model.filters.participants == []
     assert result_model.filters.title is None
     assert result_model.filters.location is None
+
 
 @pytest.mark.asyncio
 async def test_parse_llm_provider_returns_none(
@@ -240,6 +244,7 @@ async def test_parse_llm_provider_returns_none(
     assert result_model.filters.participants == []
     assert result_model.filters.title is None
     assert result_model.filters.location is None
+
 
 # Test for LLM provider exception handling (Optional but good practice)
 @pytest.mark.asyncio

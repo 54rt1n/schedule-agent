@@ -1,29 +1,30 @@
-import pytest
-import pytest_asyncio
-import httpx
 import uuid
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
-# Import fixtures from conftest
-from .conftest import RPC_URL
+import httpx
+import pytest
 
 # Import necessary types
 from scheduling_agent.common.types import (
     JSONRPCRequest,
-    TaskGetParams,
-    TaskState,
-    Task,
-    TaskStatus,
     Message,
     Part,
+    Task,
+    TaskGetParams,
     TaskNotFoundError,
+    TaskState,
+    TaskStatus,
 )
+
+# Import fixtures from conftest
+from .conftest import RPC_URL
+
 
 @pytest.mark.asyncio
 async def test_get_task_success(
     async_client: httpx.AsyncClient,
     mock_task_manager: MagicMock,
-): 
+):
     """Test tasks/get successfully retrieves a task."""
     request_id = str(uuid.uuid4())
     task_id = str(uuid.uuid4())
@@ -31,17 +32,17 @@ async def test_get_task_success(
     # Mock the TaskManager response
     mock_retrieved_task = Task(
         id=task_id,
-        status=TaskStatus(state=TaskState.WORKING, message=Message(role="agent", parts=[Part(type="text", text="Processing...")]))
+        status=TaskStatus(
+            state=TaskState.WORKING,
+            message=Message(role="agent", parts=[Part(type="text", text="Processing...")]),
+        ),
     )
     mock_task_manager.get_task.return_value = mock_retrieved_task
 
     # Prepare the RPC request
     params = TaskGetParams(id=task_id)
     rpc_request = JSONRPCRequest(
-        jsonrpc="2.0",
-        method="tasks/get",
-        params=params.model_dump(),
-        id=request_id
+        jsonrpc="2.0", method="tasks/get", params=params.model_dump(), id=request_id
     )
 
     # Action
@@ -62,25 +63,23 @@ async def test_get_task_success(
     # Assert mock calls
     mock_task_manager.get_task.assert_awaited_once_with(task_id)
 
+
 @pytest.mark.asyncio
 async def test_get_task_not_found(
     async_client: httpx.AsyncClient,
     mock_task_manager: MagicMock,
-): 
+):
     """Test tasks/get returns correct error when task is not found."""
     request_id = str(uuid.uuid4())
     task_id = str(uuid.uuid4())
 
     # Mock TaskManager to return None
-    mock_task_manager.get_task.return_value = None 
+    mock_task_manager.get_task.return_value = None
 
     # Prepare the RPC request
     params = TaskGetParams(id=task_id)
     rpc_request = JSONRPCRequest(
-        jsonrpc="2.0",
-        method="tasks/get",
-        params=params.model_dump(),
-        id=request_id
+        jsonrpc="2.0", method="tasks/get", params=params.model_dump(), id=request_id
     )
 
     # Action
@@ -100,4 +99,4 @@ async def test_get_task_not_found(
     assert f"Task with ID '{task_id}' not found." in error_data.get("message", "")
 
     # Assert mock calls
-    mock_task_manager.get_task.assert_awaited_once_with(task_id) 
+    mock_task_manager.get_task.assert_awaited_once_with(task_id)

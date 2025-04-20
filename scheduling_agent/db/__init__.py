@@ -1,1 +1,1 @@
-# This file makes Python treat the directory `db` as containing packages. 
+# This file makes Python treat the directory `db` as containing packages.

@@ -1,14 +1,17 @@
-from typing import List, Any
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import Any
 
-from icalendar import Calendar, Event as ICalEvent, vRecur
+from icalendar import Calendar, vRecur
+from icalendar import Event as ICalEvent
 
+from scheduling_agent.core.date_utils import DateUtils  # Needed for timezone handling
 from scheduling_agent.db.models import Event as DbEvent
-from .base import CalendarExporter
-from scheduling_agent.core.date_utils import DateUtils # Needed for timezone handling
 from scheduling_agent.logging_config import get_logger
 
+from .base import CalendarExporter
+
 logger = get_logger(__name__)
+
 
 class ICalExporter(CalendarExporter):
     """Exports events to the iCalendar (.ics) format."""
@@ -20,7 +23,7 @@ class ICalExporter(CalendarExporter):
         """Returns the MIME type for iCalendar files."""
         return "text/calendar"
 
-    def export(self, events: List[DbEvent], **kwargs: Any) -> str:
+    def export(self, events: list[DbEvent], **kwargs: Any) -> str:
         """Exports a list of events to an iCalendar (.ics) string.
 
         Args:
@@ -31,43 +34,44 @@ class ICalExporter(CalendarExporter):
             A string containing the calendar data in iCalendar format.
         """
         cal = Calendar()
-        cal.add('prodid', kwargs.get('product_id', '-//A2A Scheduling Agent//EN'))
-        cal.add('version', '2.0')
+        cal.add("prodid", kwargs.get("product_id", "-//A2A Scheduling Agent//EN"))
+        cal.add("version", "2.0")
 
         for event in events:
             try:
                 ical_event = ICalEvent()
-                ical_event.add('summary', event.title)
-                ical_event.add('uid', f"{event.id}@scheduling-agent") # Ensure unique UID
+                ical_event.add("summary", event.title)
+                ical_event.add("uid", f"{event.id}@scheduling-agent")  # Ensure unique UID
 
                 # Ensure datetimes are timezone-aware for icalendar
                 # Database stores naive UTC, convert to aware datetime in the event's timezone
                 start_aware = self.date_utils.convert_from_utc(event.start_time, event.time_zone)
                 end_aware = self.date_utils.convert_from_utc(event.end_time, event.time_zone)
 
-                ical_event.add('dtstart', start_aware)
-                ical_event.add('dtend', end_aware)
-                ical_event.add('dtstamp', datetime.now(timezone.utc)) # Timestamp of export creation
+                ical_event.add("dtstart", start_aware)
+                ical_event.add("dtend", end_aware)
+                ical_event.add(
+                    "dtstamp", datetime.now(UTC)
+                )  # Timestamp of export creation
 
                 if event.location:
-                    ical_event.add('location', event.location)
+                    ical_event.add("location", event.location)
                 if event.notes:
-                    ical_event.add('description', event.notes)
-                
+                    ical_event.add("description", event.notes)
+
                 # Add participants if they exist on the event object
-                if hasattr(event, 'participants') and event.participants:
+                if hasattr(event, "participants") and event.participants:
+                    # Add attendees
                     for participant in event.participants:
-                        # Assuming participant.identifier is the email address
-                        ical_event.add('attendee', f'MAILTO:{participant.identifier}')
+                        ical_event.add("attendee", f"MAILTO:{participant.identifier}")
                         # Optional: Add more attendee properties like CN, ROLE, PARTSTAT
-                        # ical_event.add('attendee', f'MAILTO:{participant.identifier}', parameters={'CN': 'Participant Name', 'ROLE': 'REQ-PARTICIPANT'})
 
                 # Add recurrence rule if present
                 if event.rrule:
                     # iCalendar library expects RRULE properties as a dict
                     try:
                         rrule_dict = vRecur.from_ical(event.rrule)
-                        ical_event.add('rrule', rrule_dict)
+                        ical_event.add("rrule", rrule_dict)
                         # TODO: Add EXDATE/RDATE handling if needed based on Event model
                     except ValueError as e:
                         logger.warning(
@@ -75,7 +79,9 @@ class ICalExporter(CalendarExporter):
                         )
 
                 cal.add_component(ical_event)
-            except Exception as e:
-                logger.error(f"Failed to export event {event.id} ('{event.title}') to iCal: {e}", exc_info=True)
+            except Exception:
+                logger.exception(
+                    f"Failed to export event {event.id} ('{event.title}') to iCal"
+                )
 
-        return cal.to_ical().decode('utf-8') 
+        return cal.to_ical().decode("utf-8")

@@ -1,44 +1,53 @@
+from typing import Any
+
 from pydantic import BaseModel, Field, HttpUrl
-from typing import List, Optional, Dict, Any
+
 # Import settings
 from scheduling_agent.settings import settings
 
 
 class AgentSkill(BaseModel):
     """Represents a skill the agent can perform."""
+
     id: str = Field(..., description="Unique identifier for the skill.")
     name: str = Field(..., description="Human-readable name of the skill.")
     description: str = Field(..., description="Description of what the skill does.")
-    parameters: Optional[Dict[str, Any]] = Field(None, description="JSON Schema describing parameters the skill accepts.")
-    examples: List[str] = Field(default=[], description="Example invocations or use cases.")
+    parameters: dict[str, Any] | None = Field(
+        None, description="JSON Schema describing parameters the skill accepts."
+    )
+    examples: list[str] = Field(default=[], description="Example invocations or use cases.")
     # TODO: Add parameters definition if needed by A2A spec
 
 
 class AgentCapabilities(BaseModel):
     """Defines the capabilities of the agent according to A2A spec."""
+
     streaming: bool = Field(default=False, description="Supports streaming responses.")
-    pushNotifications: bool = Field(default=False, description="Supports push notifications.")
-    stateTransitionHistory: bool = Field(default=False, description="Provides state history.")
+    pushNotifications: bool = Field(default=False, description="Supports push notifications.") # noqa: N815
+    stateTransitionHistory: bool = Field(default=False, description="Provides state history.") # noqa: N815
 
 
 class AgentCard(BaseModel):
     """A2A Agent Card providing agent metadata and capabilities."""
+
     name: str = Field(..., description="Agent's name.")
     description: str = Field(..., description="Brief description of the agent.")
     url: HttpUrl = Field(..., description="Base URL for the agent's API endpoint.")
     version: str = Field(..., description="Agent version.")
     capabilities: AgentCapabilities = Field(..., description="Agent's A2A capabilities.")
-    defaultInputModes: List[str] = Field(
+    defaultInputModes: list[str] = Field( # noqa: N815
         default=["text/plain", "application/json"],
-        description="Default supported input MIME types."
+        description="Default supported input MIME types.",
     )
-    defaultOutputModes: List[str] = Field(
+    defaultOutputModes: list[str] = Field( # noqa: N815
         default=["text/plain", "application/json"],
-        description="Default supported output MIME types."
+        description="Default supported output MIME types.",
     )
-    skills: List[AgentSkill] = Field(default=[], description="List of skills the agent offers.")
+    skills: list[AgentSkill] = Field(default=[], description="List of skills the agent offers.")
+
 
 # --- Agent Card Instance ---
+
 
 # Define the specific AgentCard construction within the getter function
 def get_agent_card() -> AgentCard:
@@ -47,10 +56,6 @@ def get_agent_card() -> AgentCard:
     Reads configuration from settings.
     """
     # Load configuration from settings object
-    # agent_host = os.getenv("AGENT_HOST", "localhost") # Replaced by settings
-    # agent_port = int(os.getenv("AGENT_PORT", "8000")) # Replaced by settings
-    # agent_version = os.getenv("AGENT_VERSION", "0.1.0") # Replaced by settings
-
     # Construct the AgentCard dynamically using settings
     agent_card_instance = AgentCard(
         name="Scheduling Agent",
@@ -60,15 +65,15 @@ def get_agent_card() -> AgentCard:
         # Use settings for version
         version=settings.agent_version,
         capabilities=AgentCapabilities(
-            streaming=False, # Not implemented yet
-            pushNotifications=False, # Not implemented yet
-            stateTransitionHistory=False
+            streaming=False,  # Not implemented yet
+            pushNotifications=False,  # Not implemented yet
+            stateTransitionHistory=False,
         ),
         defaultInputModes=["text/plain", "application/json"],
         defaultOutputModes=[
             "text/plain",
             "application/json",
-            "text/calendar", # For iCal export
+            "text/calendar",  # For iCal export
             # Add other output types like org-mode if applicable
         ],
         skills=[
@@ -79,8 +84,8 @@ def get_agent_card() -> AgentCard:
                 examples=[
                     "Schedule a team meeting on Wednesday at 2pm",
                     "Create a recurring event every Monday at 9am with bob@example.com",
-                    '{"title": "API Event", "startTime": "2024-09-01T10:00:00Z", "endTime": "2024-09-01T11:00:00Z"}'
-                ]
+                    '{"title": "API Event", "startTime": "2024-09-01T10:00:00Z", "endTime": "2024-09-01T11:00:00Z"}',
+                ],
             ),
             AgentSkill(
                 id="query_schedule",
@@ -89,8 +94,8 @@ def get_agent_card() -> AgentCard:
                 examples=[
                     "What's on my calendar this week?",
                     "Show me all meetings with Marketing team between June 1st and June 15th",
-                    '{"startDate": "2024-08-01", "endDate": "2024-08-07"}'
-                ]
+                    '{"startDate": "2024-08-01", "endDate": "2024-08-07"}',
+                ],
             ),
             AgentSkill(
                 id="export_calendar",
@@ -99,8 +104,8 @@ def get_agent_card() -> AgentCard:
                 examples=[
                     "Export my calendar for June in iCalendar format",
                     "Create an org-mode export of my schedule for next week",
-                    '{"format": "ics", "startDate": "2024-10-01", "endDate": "2024-10-31"}'
-                ]
+                    '{"format": "ics", "startDate": "2024-10-01", "endDate": "2024-10-31"}',
+                ],
             ),
             AgentSkill(
                 id="update_event",
@@ -108,18 +113,15 @@ def get_agent_card() -> AgentCard:
                 description="Modify existing calendar events (Not Implemented Yet).",
                 examples=[
                     "Reschedule tomorrow's meeting to Friday",
-                    "Update the location for the project review"
-                ]
+                    "Update the location for the project review",
+                ],
             ),
             AgentSkill(
                 id="delete_event",
                 name="Delete Event",
                 description="Delete existing calendar events (Not Implemented Yet).",
-                examples=[
-                    "Cancel the meeting on Wednesday",
-                    "Delete the recurring team sync"
-                ]
-            )
-        ]
+                examples=["Cancel the meeting on Wednesday", "Delete the recurring team sync"],
+            ),
+        ],
     )
-    return agent_card_instance 
+    return agent_card_instance

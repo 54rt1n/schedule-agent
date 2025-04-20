@@ -1,17 +1,17 @@
-import os
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, AsyncEngine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy import event
-from sqlmodel import SQLModel # Though not used directly here, needed for metadata later
 from dotenv import load_dotenv
+from sqlalchemy import event
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
+from sqlalchemy.orm import sessionmaker
+from sqlmodel import SQLModel  # Though not used directly here, needed for metadata later
+
+# Corrected import path for logging_config
+from scheduling_agent.logging_config import get_logger
 
 # Import settings object
 from scheduling_agent.settings import settings
-# Corrected import path for logging_config
-from scheduling_agent.logging_config import get_logger
 
 # Load environment variables from .env file (keep for other potential vars)
 load_dotenv()
@@ -20,11 +20,7 @@ logger = get_logger(__name__)
 
 # --- Database Configuration Function (Removed) ---
 # (Now using settings.database_url directly)
-# def get_database_url() -> str:
-#     """Gets the database URL from environment variables."""
-#     return os.environ.get(
-#         "DATABASE_URL", "sqlite+aiosqlite:///./schedule_agent.db"
-#     )
+
 
 # --- Engine Creation Function ---
 def create_db_engine(db_url: str) -> AsyncEngine:
@@ -44,8 +40,9 @@ def create_db_engine(db_url: str) -> AsyncEngine:
 
         # --- SQLite WAL Mode Optimization ---
         if db_url.startswith("sqlite"):
+
             @event.listens_for(engine.sync_engine, "connect")
-            def _enable_wal(dbapi_con, connection_record):
+            def _enable_wal(dbapi_con):
                 cursor = dbapi_con.cursor()
                 try:
                     cursor.execute("PRAGMA journal_mode=WAL;")
@@ -57,8 +54,9 @@ def create_db_engine(db_url: str) -> AsyncEngine:
 
         return engine
     except Exception as e:
-        logger.error("Failed to create database engine", error=str(e), db_url=db_url)
+        logger.exception("Failed to create database engine", error=str(e), db_url=db_url)
         raise
+
 
 # --- Session Factory Creation Function ---
 def create_session_factory(engine: AsyncEngine) -> sessionmaker:
@@ -71,6 +69,7 @@ def create_session_factory(engine: AsyncEngine) -> sessionmaker:
         autocommit=False,
     )
 
+
 # --- Session Context Manager --- #
 @asynccontextmanager
 async def get_async_session(session_factory: sessionmaker) -> AsyncGenerator[AsyncSession, None]:
@@ -82,7 +81,7 @@ async def get_async_session(session_factory: sessionmaker) -> AsyncGenerator[Asy
         try:
             yield session
         except Exception as e:
-            logger.error("Session rollback initiated due to error", error=str(e))
+            logger.exception("Session rollback initiated due to error", error=str(e))
             await session.rollback()
             raise
         finally:
@@ -94,23 +93,19 @@ async def get_async_session(session_factory: sessionmaker) -> AsyncGenerator[Asy
 async def initialize_database(engine: AsyncEngine):
     """Initialize the database by creating all tables."""
     # Placeholder: Implement table creation logic (e.g., using SQLModel or Alembic)
-    # logger.info("Database initialization placeholder.")
     async with engine.begin() as conn:
         # In a real app, consider Alembic migrations
         # For simple cases or testing, SQLModel create_all works
         await conn.run_sync(SQLModel.metadata.create_all)
-    logger.info("Database tables created successfully (if not already present). Using SQLModel.metadata.create_all.")
+    logger.info(
+        "Database tables created successfully (if not already present). Using SQLModel.metadata.create_all."
+    )
+
 
 # Example usage (typically in your service layer or API endpoints):
-# async def some_database_operation():
-#     async with get_async_session() as session:
-#         # Perform database operations using 'session'
-#         result = await session.execute(select(MyModel).where(MyModel.id == 1))
-#         item = result.scalars().first()
-#         return item 
 
 # --- Create engine and session factory instances for import ---
 # Use settings.database_url
 db_url = settings.database_url
 engine = create_db_engine(db_url)
-async_session_factory = create_session_factory(engine) 
+async_session_factory = create_session_factory(engine)

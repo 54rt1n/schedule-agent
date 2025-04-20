@@ -1,29 +1,31 @@
-import pytest
-import pytest_asyncio
-import httpx
 import uuid
 from unittest.mock import MagicMock, patch
 
-# Import fixtures from conftest
-from .conftest import RPC_URL, BASE_URL # Import BASE_URL for well-known
+import httpx
+import pytest
 
-# Import necessary types
-from scheduling_agent.common.types import JSONRPCRequest
-# Import middleware module to patch its settings
-from scheduling_agent.api.middleware import auth as auth_middleware
 # Import AgentCard and get_agent_card for validation
 from scheduling_agent.agent_card import AgentCard, get_agent_card
 
+# Import middleware module to patch its settings
+from scheduling_agent.api.middleware import auth as auth_middleware
+
+# Import necessary types
+from scheduling_agent.common.types import JSONRPCRequest
+
+# Import fixtures from conftest
+from .conftest import RPC_URL  # Import BASE_URL for well-known
+
 # --- Fixture to Enable Auth for these Tests ---
+
 
 @pytest.fixture(autouse=True)
 def enable_auth_for_tests():
     """Patches VALID_API_KEYS specifically for tests in this module."""
     test_api_keys = {"test-key-1", "test-key-2"}
-    with patch.object(auth_middleware, 'VALID_API_KEYS', test_api_keys) as _mocked_keys:
-        # print(f"Auth enabled for test: {auth_middleware.VALID_API_KEYS}") # Debug
+    with patch.object(auth_middleware, "VALID_API_KEYS", test_api_keys) as _mocked_keys:
         yield
-    # print(f"Auth restored after test: {auth_middleware.VALID_API_KEYS}") # Debug
+
 
 # --- Tests for API Key Authentication Middleware ---
 
@@ -32,15 +34,16 @@ def enable_auth_for_tests():
 VALID_API_KEY = "test-key-1"
 INVALID_API_KEY = "invalid-key"
 
+
 @pytest.mark.asyncio
 async def test_rpc_endpoint_no_auth_header(async_client: httpx.AsyncClient):
     """Test RPC endpoint returns 401/403 if Authorization header is missing."""
     request_id = str(uuid.uuid4())
     rpc_request = JSONRPCRequest(
         jsonrpc="2.0",
-        method="tasks/get", # Use a known method
+        method="tasks/get",  # Use a known method
         params={"id": "some-task-id"},
-        id=request_id
+        id=request_id,
     )
 
     response = await async_client.post(RPC_URL, json=rpc_request.model_dump())
@@ -50,15 +53,13 @@ async def test_rpc_endpoint_no_auth_header(async_client: httpx.AsyncClient):
     # Optionally check response body for error message if middleware provides one
     # assert "Not authenticated" in response.text or "Forbidden" in response.text
 
+
 @pytest.mark.asyncio
 async def test_rpc_endpoint_invalid_bearer_token(async_client: httpx.AsyncClient):
     """Test RPC endpoint returns 401/403 if Authorization header has invalid key."""
     request_id = str(uuid.uuid4())
     rpc_request = JSONRPCRequest(
-        jsonrpc="2.0",
-        method="tasks/get",
-        params={"id": "some-task-id"},
-        id=request_id
+        jsonrpc="2.0", method="tasks/get", params={"id": "some-task-id"}, id=request_id
     )
     headers = {"Authorization": f"Bearer {INVALID_API_KEY}"}
 
@@ -66,25 +67,28 @@ async def test_rpc_endpoint_invalid_bearer_token(async_client: httpx.AsyncClient
 
     assert response.status_code in [401, 403]
 
+
 @pytest.mark.asyncio
-async def test_rpc_endpoint_valid_bearer_token(async_client: httpx.AsyncClient, mock_task_manager: MagicMock):
+async def test_rpc_endpoint_valid_bearer_token(
+    async_client: httpx.AsyncClient, mock_task_manager: MagicMock
+):
     """Test RPC endpoint works (returns 200 OK) with a valid Authorization header.
-       We expect an A2A error (e.g., TaskNotFound) because the underlying call will proceed.
+    We expect an A2A error (e.g., TaskNotFound) because the underlying call will proceed.
     """
     request_id = str(uuid.uuid4())
     task_id = str(uuid.uuid4())
     rpc_request = JSONRPCRequest(
-        jsonrpc="2.0",
-        method="tasks/get",
-        params={"id": task_id},
-        id=request_id
+        jsonrpc="2.0", method="tasks/get", params={"id": task_id}, id=request_id
     )
     headers = {"Authorization": f"Bearer {VALID_API_KEY}"}
 
     # Mock TaskManager to return TaskNotFound error for this specific call
     # Ensure the mock is configured *before* the client call
     from scheduling_agent.common.types import TaskNotFoundError
-    mock_task_manager.get_task.side_effect = TaskNotFoundError(f"Task with ID '{task_id}' not found.")
+
+    mock_task_manager.get_task.side_effect = TaskNotFoundError(
+        f"Task with ID '{task_id}' not found."
+    )
 
     response = await async_client.post(RPC_URL, json=rpc_request.model_dump(), headers=headers)
 
@@ -94,6 +98,7 @@ async def test_rpc_endpoint_valid_bearer_token(async_client: httpx.AsyncClient, 
     assert response_data.get("id") == request_id
     assert "error" in response_data
     assert response_data["error"].get("code") == TaskNotFoundError.DEFAULT_CODE
+
 
 @pytest.mark.asyncio
 async def test_well_known_endpoint_no_auth_needed(async_client: httpx.AsyncClient):
@@ -124,5 +129,3 @@ async def test_well_known_endpoint_no_auth_needed(async_client: httpx.AsyncClien
     assert response_data["capabilities"] == expected_card_data["capabilities"]
     assert response_data["skills"] == expected_card_data["skills"]
     # Add more specific checks if needed, e.g., for nested structures
-    # The line below was removed as AgentCapabilities has no nested 'jsonrpc' key
-    # assert response_data["capabilities"]["jsonrpc"]["methods"] == expected_card_data["capabilities"]["jsonrpc"]["methods"] 

@@ -1,16 +1,17 @@
 """Date and time utility functions."""
 
-from datetime import datetime, timezone, date, time, timedelta
-from typing import Optional, List, Generator, Tuple
+from datetime import UTC, datetime
+from functools import lru_cache
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
 from dateutil import rrule
 from dateutil.parser import parse as dateutil_parse
-from functools import lru_cache
 
 from scheduling_agent.db.models import Event, ExcludedDate, ModifiedInstance
 from scheduling_agent.logging_config import get_logger
 
 logger = get_logger(__name__)
+
 
 class DateUtils:
     """Provides utilities for handling dates, times, timezones, and recurrence."""
@@ -35,15 +36,15 @@ class DateUtils:
 
             # If parsing resulted in a naive datetime, assume UTC
             if dt.tzinfo is None:
-                return dt.replace(tzinfo=timezone.utc)
-            
+                return dt.replace(tzinfo=UTC)
+
             # If it has timezone info, normalize it to standard library UTC
-            return dt.astimezone(timezone.utc)
+            return dt.astimezone(UTC)
         except Exception as e:
-            logger.error(f"Failed to parse datetime string: '{dt_str}'", error=str(e))
+            logger.exception(f"Failed to parse datetime string: '{dt_str}'", error=str(e))
             raise ValueError(f"Invalid datetime format: {dt_str}") from e
 
-    def normalize_to_utc(self, dt: datetime, tz_name: Optional[str] = None) -> datetime:
+    def normalize_to_utc(self, dt: datetime, tz_name: str | None = None) -> datetime:
         """Converts a datetime (aware or naive) to an aware UTC datetime.
 
         If the input datetime is naive, it's assumed to be in the timezone
@@ -63,15 +64,17 @@ class DateUtils:
                 local_tz = ZoneInfo(local_tz_name)
                 dt = dt.replace(tzinfo=local_tz)
             except ZoneInfoNotFoundError:
-                logger.warning(f"Invalid timezone '{local_tz_name}' provided for naive datetime, assuming UTC.")
-                dt = dt.replace(tzinfo=timezone.utc)
-            except Exception as e:
-                logger.error("Error applying timezone to naive datetime", exc_info=True)
+                logger.warning(
+                    f"Invalid timezone '{local_tz_name}' provided for naive datetime, assuming UTC."
+                )
+                dt = dt.replace(tzinfo=UTC)
+            except Exception:
+                logger.exception("Error applying timezone to naive datetime")
                 # Fallback to assuming UTC
-                dt = dt.replace(tzinfo=timezone.utc)
+                dt = dt.replace(tzinfo=UTC)
 
         # Now dt is guaranteed to be aware, convert to UTC
-        return dt.astimezone(timezone.utc)
+        return dt.astimezone(UTC)
 
     def convert_from_utc(self, dt_utc: datetime, tz_name: str) -> datetime:
         """Converts an aware UTC datetime to the specified target timezone.
@@ -84,50 +87,51 @@ class DateUtils:
 
         Returns:
             An aware datetime object in the target timezone.
-        
+
         Raises:
             ValueError: If the target timezone name is invalid.
         """
         if dt_utc.tzinfo is None:
             # Assume naive input is UTC
-            dt_utc = dt_utc.replace(tzinfo=timezone.utc)
-        
+            dt_utc = dt_utc.replace(tzinfo=UTC)
+
         try:
             target_tz = ZoneInfo(tz_name)
             return dt_utc.astimezone(target_tz)
-        except ZoneInfoNotFoundError:
-            logger.error(f"Invalid target timezone name: '{tz_name}'")
-            raise ValueError(f"Invalid target timezone: {tz_name}")
+        except ZoneInfoNotFoundError as e:
+            logger.exception(f"Invalid target timezone name: '{tz_name}'")
+            raise ValueError(f"Invalid target timezone: {tz_name}") from e
         except Exception as e:
-            logger.error("Error converting timezone", exc_info=True)
-            raise ValueError(f"Could not convert to timezone: {tz_name}")
+            logger.exception("Error converting timezone")
+            raise ValueError(f"Could not convert to timezone: {tz_name}") from e
 
+    @staticmethod
     @lru_cache(maxsize=128)
-    def _parse_rrule_string(self, rrule_str: str, dtstart: datetime) -> Optional[rrule.rruleset]:
+    def _parse_rrule_string(rrule_str: str, dtstart: datetime) -> rrule.rruleset | None:
         """Parses an RRULE string into a dateutil rruleset, with caching."""
         if not rrule_str:
             return None
         try:
             # dateutil.rrule.rrulestr requires aware dtstart
             if dtstart.tzinfo is None:
-                dtstart = dtstart.replace(tzinfo=timezone.utc)
+                dtstart = dtstart.replace(tzinfo=UTC)
 
             # TODO: Handle potential EXDATE/RDATE within the rrule_str itself if needed
             # Currently assuming rrule_str is just the main RRULE part.
             rule = rrule.rrulestr(rrule_str, dtstart=dtstart, forceset=True, cache=True)
             return rule
         except Exception as e:
-            logger.error(f"Failed to parse RRULE string: '{rrule_str}'", error=str(e))
-            return None # Return None or raise an error?
+            logger.exception(f"Failed to parse RRULE string: '{rrule_str}'", error=str(e))
+            return None  # Return None or raise an error?
 
     def expand_recurrence(
         self,
         base_event: Event,
         range_start_utc: datetime,
         range_end_utc: datetime,
-        excluded_dates: List[ExcludedDate],
-        modified_instances: List[ModifiedInstance],
-    ) -> List[dict]: # Returning list of dicts for now
+        excluded_dates: list[ExcludedDate],
+        modified_instances: list[ModifiedInstance],
+    ) -> list[dict]:  # Returning list of dicts for now
         """Expands a recurring event within a date range, applying exclusions/modifications.
 
         Args:
@@ -142,7 +146,7 @@ class DateUtils:
         """
         occurrences = []
         if not base_event.rrule:
-            return occurrences # Not a recurring event
+            return occurrences  # Not a recurring event
 
         # Base event times are stored as NAIVE UTC.
         base_start_naive_utc = base_event.start_time
@@ -154,15 +158,19 @@ class DateUtils:
 
         # Convert the naive UTC start time to the ORIGINAL LOCAL timezone aware time for rrule
         try:
-            original_local_dtstart = self.convert_from_utc(base_start_naive_utc.replace(tzinfo=timezone.utc), original_tz_name)
+            original_local_dtstart = self.convert_from_utc(
+                base_start_naive_utc.replace(tzinfo=UTC), original_tz_name
+            )
         except ValueError:
-            logger.error(f"Invalid original timezone '{original_tz_name}' for event {base_event.id}, cannot expand recurrence accurately.")
-            return occurrences # Cannot proceed without valid original TZ
+            logger.exception(
+                f"Invalid original timezone '{original_tz_name}' for event {base_event.id}, cannot expand recurrence accurately."
+            )
+            return occurrences  # Cannot proceed without valid original TZ
 
         # Parse the RRULE string using the AWARE LOCAL start time
-        ruleset = self._parse_rrule_string(base_event.rrule, dtstart=original_local_dtstart)
+        ruleset = DateUtils._parse_rrule_string(base_event.rrule, dtstart=original_local_dtstart)
         if not ruleset:
-            return occurrences # Could not parse rule
+            return occurrences  # Could not parse rule
 
         # Prepare lookup sets/dicts for exclusions and modifications
         excluded_set = {ex.excluded_date.date() for ex in excluded_dates}
@@ -175,21 +183,23 @@ class DateUtils:
             range_start_local = self.convert_from_utc(range_start_utc, original_tz_name)
             range_end_local = self.convert_from_utc(range_end_utc, original_tz_name)
         except ValueError:
-             logger.error(f"Invalid original timezone '{original_tz_name}' for event {base_event.id} during range conversion.")
-             return occurrences
+            logger.exception(
+                f"Invalid original timezone '{original_tz_name}' for event {base_event.id} during range conversion."
+            )
+            return occurrences
 
         # Generate instances in the LOCAL timezone
         instance_datetimes_local = ruleset.between(
-            range_start_local,   # Use range converted to local timezone
-            range_end_local,     # Use range converted to local timezone
-            inc=True # Include boundaries
+            range_start_local,  # Use range converted to local timezone
+            range_end_local,  # Use range converted to local timezone
+            inc=True,  # Include boundaries
         )
 
         for instance_dt_local in instance_datetimes_local:
             # instance_dt_local from rrule is aware in the original local timezone
             # Convert instance start time to UTC for consistent internal representation and lookups
             instance_dt_utc = self.normalize_to_utc(instance_dt_local)
-            instance_date_naive = instance_dt_utc.date() # Use UTC date for lookup keys
+            instance_date_naive = instance_dt_utc.date()  # Use UTC date for lookup keys
 
             # 1. Check for exclusions (using naive UTC date)
             if instance_date_naive in excluded_set:
@@ -201,41 +211,57 @@ class DateUtils:
             if instance_date_naive in modified_dict:
                 mod_instance = modified_dict[instance_date_naive]
                 # Use modified data
-                occurrence_data['base_event_id'] = base_event.id
+                occurrence_data["base_event_id"] = base_event.id
                 # Normalize modified times to UTC. Assume modified times are naive
                 # in the timezone specified in the modification or the base event.
-                mod_tz = mod_instance.time_zone or base_event.time_zone # TZ for the modification itself
+                mod_tz = (
+                    mod_instance.time_zone or base_event.time_zone
+                )  # TZ for the modification itself
                 try:
                     # Modification times are naive, assume they are in mod_tz
-                    mod_start_aware_utc = self.normalize_to_utc(mod_instance.start_time, tz_name=mod_tz)
+                    mod_start_aware_utc = self.normalize_to_utc(
+                        mod_instance.start_time, tz_name=mod_tz
+                    )
                     mod_end_aware_utc = self.normalize_to_utc(mod_instance.end_time, tz_name=mod_tz)
                 except ValueError:
-                    logger.warning(f"Invalid timezone '{mod_tz}' for modified instance {mod_instance.id}, skipping.")
-                    continue # Skip this modified instance
+                    logger.warning(
+                        f"Invalid timezone '{mod_tz}' for modified instance {mod_instance.id}, skipping."
+                    )
+                    continue  # Skip this modified instance
 
-                occurrence_data['instance_start_time'] = mod_start_aware_utc # Aware UTC
-                occurrence_data['start_time'] = mod_start_aware_utc            # Aware UTC
-                occurrence_data['end_time'] = mod_end_aware_utc              # Aware UTC
-                occurrence_data['time_zone'] = mod_tz # Store the effective timezone of the modification
-                occurrence_data['title'] = mod_instance.title if mod_instance.title is not None else base_event.title
-                occurrence_data['location'] = mod_instance.location if mod_instance.location is not None else base_event.location
-                occurrence_data['notes'] = mod_instance.notes if mod_instance.notes is not None else base_event.notes
-                occurrence_data['rrule'] = None # Modified instances don't recur
-                occurrence_data['modified_instance_id'] = mod_instance.id
+                occurrence_data["instance_start_time"] = mod_start_aware_utc  # Aware UTC
+                occurrence_data["start_time"] = mod_start_aware_utc  # Aware UTC
+                occurrence_data["end_time"] = mod_end_aware_utc  # Aware UTC
+                occurrence_data["time_zone"] = (
+                    mod_tz  # Store the effective timezone of the modification
+                )
+                occurrence_data["title"] = (
+                    mod_instance.title if mod_instance.title is not None else base_event.title
+                )
+                occurrence_data["location"] = (
+                    mod_instance.location
+                    if mod_instance.location is not None
+                    else base_event.location
+                )
+                occurrence_data["notes"] = (
+                    mod_instance.notes if mod_instance.notes is not None else base_event.notes
+                )
+                occurrence_data["rrule"] = None  # Modified instances don't recur
+                occurrence_data["modified_instance_id"] = mod_instance.id
             else:
                 # 3. Generate standard occurrence from base event
                 # instance_dt_utc is the correct aware UTC start time for this standard instance
-                instance_end_utc = instance_dt_utc + duration # Add original duration
-                occurrence_data['base_event_id'] = base_event.id
-                occurrence_data['instance_start_time'] = instance_dt_utc # Aware UTC
-                occurrence_data['start_time'] = instance_dt_utc # Aware UTC
-                occurrence_data['end_time'] = instance_end_utc # Aware UTC
-                occurrence_data['time_zone'] = base_event.time_zone # Original timezone
-                occurrence_data['title'] = base_event.title
-                occurrence_data['location'] = base_event.location
-                occurrence_data['notes'] = base_event.notes
-                occurrence_data['rrule'] = None
-                occurrence_data['modified_instance_id'] = None
+                instance_end_utc = instance_dt_utc + duration  # Add original duration
+                occurrence_data["base_event_id"] = base_event.id
+                occurrence_data["instance_start_time"] = instance_dt_utc  # Aware UTC
+                occurrence_data["start_time"] = instance_dt_utc  # Aware UTC
+                occurrence_data["end_time"] = instance_end_utc  # Aware UTC
+                occurrence_data["time_zone"] = base_event.time_zone  # Original timezone
+                occurrence_data["title"] = base_event.title
+                occurrence_data["location"] = base_event.location
+                occurrence_data["notes"] = base_event.notes
+                occurrence_data["rrule"] = None
+                occurrence_data["modified_instance_id"] = None
 
             occurrences.append(occurrence_data)
 
@@ -243,4 +269,3 @@ class DateUtils:
 
     # TODO: Implement methods
     # ... other helpers ...
-    pass 

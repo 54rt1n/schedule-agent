@@ -1,31 +1,30 @@
-import pytest
-import pytest_asyncio
-import httpx
-import uuid
 import base64
+import uuid
 from unittest.mock import AsyncMock, MagicMock
 
-# Import fixtures from conftest
-from .conftest import RPC_URL
+import httpx
+import pytest
 
 # Import necessary types
 from scheduling_agent.common.types import (
+    Artifact,
+    InvalidParamsError,
     JSONRPCRequest,
-    TaskSendParams,
-    TaskState,
-    Task,
-    TaskStatus,
     Message,
     Part,
-    Artifact,
-    FileContent, # Need FileContent for assertions
-    InvalidParamsError,
+    Task,
+    TaskSendParams,
+    TaskState,
+    TaskStatus,
 )
-from scheduling_agent.core.schemas import LLMSchedulingParseResult, LLMDateInfo, LLMFilters
-from scheduling_agent.db.models import Event
 
 # Import exporters for mocking (optional, but helps with spec)
 from scheduling_agent.core.exporters.ical_exporter import ICalExporter
+from scheduling_agent.core.schemas import LLMDateInfo, LLMFilters, LLMSchedulingParseResult
+from scheduling_agent.db.models import Event
+
+# Import fixtures from conftest
+from .conftest import RPC_URL
 
 
 @pytest.mark.asyncio
@@ -46,14 +45,14 @@ async def test_export_calendar_success(
     mock_nlp_result = LLMSchedulingParseResult(
         intent="export_calendar",
         date_info=LLMDateInfo(start_date="next week start", end_date="next week end"),
-        filters={"format": "ics"}
+        filters={"format": "ics"},
     )
     mock_nlp_processor.parse_natural_language_query.return_value = mock_nlp_result
 
     # 2. Mock Database Service to return events
     mock_events = [
         Event(id=uuid.uuid4(), title="Meeting A", start_time=..., end_time=...),
-        Event(id=uuid.uuid4(), title="Meeting B", start_time=..., end_time=...)
+        Event(id=uuid.uuid4(), title="Meeting B", start_time=..., end_time=...),
     ]
     mock_db_service.get_events_in_range.return_value = mock_events
 
@@ -73,28 +72,31 @@ async def test_export_calendar_success(
     # If exporters are directly part of another dependency (like TaskManager init), mock that part.
 
     # 4. Mock TaskManager complete_task to return the final task
-    expected_base64_bytes = base64.b64encode(exported_string.encode('utf-8')).decode('utf-8')
+    expected_base64_bytes = base64.b64encode(exported_string.encode("utf-8")).decode("utf-8")
     expected_artifact = Artifact(
         name="calendar.ics",
-        parts=[Part(type="file", file={
-            "name": "calendar.ics",
-            "mimeType": "text/calendar",
-            "bytes": expected_base64_bytes
-            })]
+        parts=[
+            Part(
+                type="file",
+                file={
+                    "name": "calendar.ics",
+                    "mimeType": "text/calendar",
+                    "bytes": expected_base64_bytes,
+                },
+            )
+        ],
     )
-    final_task = Task(id=task_id, status=TaskStatus(state=TaskState.COMPLETED), artifacts=[expected_artifact])
+    final_task = Task(
+        id=task_id, status=TaskStatus(state=TaskState.COMPLETED), artifacts=[expected_artifact]
+    )
     mock_task_manager.complete_task.return_value = final_task
 
     # Prepare RPC request
     params = TaskSendParams(
-        id=task_id,
-        message=Message(role="user", parts=[Part(type="text", text=query)])
+        id=task_id, message=Message(role="user", parts=[Part(type="text", text=query)])
     )
     rpc_request = JSONRPCRequest(
-        jsonrpc="2.0",
-        method="tasks/send",
-        params=params.model_dump(),
-        id=request_id
+        jsonrpc="2.0", method="tasks/send", params=params.model_dump(), id=request_id
     )
 
     # Action
@@ -126,10 +128,9 @@ async def test_export_calendar_success(
     mock_task_manager.create_task.assert_called_once()
     mock_nlp_processor.parse_natural_language_query.assert_awaited_once_with(query)
     mock_db_service.get_events_in_range.assert_awaited_once()
-    # TODO: Assert the specific exporter was called (requires proper DI mocking)
-    # mock_exporter_instance.export.assert_called_once_with(mock_events)
     mock_task_manager.complete_task.assert_awaited_once()
     # TODO: Assert artifact details passed to complete_task
+
 
 @pytest.mark.asyncio
 async def test_export_calendar_unsupported_format(
@@ -149,32 +150,25 @@ async def test_export_calendar_unsupported_format(
     # Mock NLP result for export intent with unsupported format
     # Create an LLMFilters instance with the format attribute
     mock_filters = LLMFilters(format="foo")
-    # mock_filters = MagicMock()
-    # mock_filters.format = "foo"
     mock_nlp_result = LLMSchedulingParseResult(
         intent="export_calendar",
-        # filters={"format": "foo"} # Old dict approach
-        filters=mock_filters # Use the LLMFilters instance
+        filters=mock_filters,  # Use the LLMFilters instance
     )
     mock_nlp_processor.parse_natural_language_query.return_value = mock_nlp_result
 
     # Prepare RPC request
     params = TaskSendParams(
-        id=task_id,
-        message=Message(role="user", parts=[Part(type="text", text=query)])
+        id=task_id, message=Message(role="user", parts=[Part(type="text", text=query)])
     )
     rpc_request = JSONRPCRequest(
-        jsonrpc="2.0",
-        method="tasks/send",
-        params=params.model_dump(),
-        id=request_id
+        jsonrpc="2.0", method="tasks/send", params=params.model_dump(), id=request_id
     )
 
     # Action
     response = await async_client.post(RPC_URL, json=rpc_request.model_dump())
 
     # Assertions: Expect InvalidParamsError
-    assert response.status_code == 200 # JSON-RPC errors use 200 OK
+    assert response.status_code == 200  # JSON-RPC errors use 200 OK
     response_data = response.json()
     assert response_data.get("id") == request_id
     assert "result" not in response_data or response_data["result"] is None
@@ -189,4 +183,4 @@ async def test_export_calendar_unsupported_format(
     mock_nlp_processor.parse_natural_language_query.assert_awaited_once_with(query)
     mock_db_service.get_events_in_range.assert_not_called()
     mock_task_manager.complete_task.assert_not_called()
-    mock_task_manager.fail_task.assert_not_called() # Should raise before failing task 
+    mock_task_manager.fail_task.assert_not_called()  # Should raise before failing task

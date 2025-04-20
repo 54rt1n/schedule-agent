@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 
 from scheduling_agent.agent_card import AgentCard, get_agent_card
 
@@ -15,4 +15,4 @@ router = APIRouter()
 )
 async def get_agent_card_endpoint() -> AgentCard:
     """Returns the agent's capabilities card."""
-    return get_agent_card() 
+    return get_agent_card()

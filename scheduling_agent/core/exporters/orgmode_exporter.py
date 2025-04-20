@@ -1,12 +1,13 @@
-from typing import List, Any
-from datetime import datetime, timezone
+from typing import Any
 
-from scheduling_agent.db.models import Event as DbEvent
-from .base import CalendarExporter
 from scheduling_agent.core.date_utils import DateUtils
+from scheduling_agent.db.models import Event as DbEvent
 from scheduling_agent.logging_config import get_logger
 
+from .base import CalendarExporter
+
 logger = get_logger(__name__)
+
 
 class OrgModeExporter(CalendarExporter):
     """Exports events to Emacs Org mode format."""
@@ -14,7 +15,7 @@ class OrgModeExporter(CalendarExporter):
     def __init__(self, date_utils: DateUtils = None):
         self.date_utils = date_utils or DateUtils()
 
-    def export(self, events: List[DbEvent], **kwargs: Any) -> str:
+    def export(self, events: list[DbEvent], **kwargs: Any) -> str:
         """Exports a list of events to an Org mode formatted string.
 
         Args:
@@ -25,8 +26,8 @@ class OrgModeExporter(CalendarExporter):
             A string containing the calendar data in Org mode format.
         """
         org_entries = []
-        heading_level = kwargs.get('heading_level', 1)
-        heading_stars = '*' * heading_level
+        heading_level = kwargs.get("heading_level", 1)
+        heading_stars = "*" * heading_level
 
         # Sort events for chronological output
         events.sort(key=lambda e: e.start_time)
@@ -40,7 +41,7 @@ class OrgModeExporter(CalendarExporter):
                 # Format timestamp string: <YYYY-MM-DD Day HH:MM-HH:MM>
                 # Org mode uses abbreviated day names (Mon, Tue, etc.)
                 day_abbr = start_local.strftime("%a")
-                time_format = "%Y-%m-%d" # Date part
+                time_format = "%Y-%m-%d"  # Date part
                 time_str_start = start_local.strftime(f"{time_format} {day_abbr} %H:%M")
                 # Include end date only if different from start date
                 if start_local.date() == end_local.date():
@@ -63,20 +64,22 @@ class OrgModeExporter(CalendarExporter):
                 if event.time_zone:
                     entry += f"  :TIMEZONE: {event.time_zone}\n"
                 # Add participants to properties if they exist
-                if hasattr(event, 'participants') and event.participants:
+                if hasattr(event, "participants") and event.participants:
                     participant_str = ", ".join([p.identifier for p in event.participants])
                     entry += f"  :PARTICIPANTS: {participant_str}\n"
                 if event.rrule:
-                     entry += f"  :RRULE: {event.rrule}\n"
+                    entry += f"  :RRULE: {event.rrule}\n"
                 entry += "  :END:\n"
 
                 # Add notes/description
                 if event.notes:
-                    entry += f"\n{event.notes.strip()}\n" # Add newline before notes
+                    entry += f"\n{event.notes.strip()}\n"  # Add newline before notes
 
                 org_entries.append(entry)
 
-            except Exception as e:
-                logger.error(f"Failed to export event {event.id} ('{event.title}') to Org mode: {e}", exc_info=True)
+            except Exception:
+                logger.exception(
+                    f"Failed to export event {event.id} ('{event.title}') to Org mode"
+                )
 
-        return "\n".join(org_entries) # Separate entries with a newline 
+        return "\n".join(org_entries)  # Separate entries with a newline

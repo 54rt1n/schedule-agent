@@ -1,14 +1,14 @@
 """Processes natural language queries related to scheduling."""
 
-import asyncio
-from typing import Dict, Any, Optional
 
-from scheduling_agent.core.llm_provider import LLMProvider
 from scheduling_agent.core.date_utils import DateUtils
-from .schemas import LLMSchedulingParseResult, LLMDateInfo, LLMFilters
+from scheduling_agent.core.llm_provider import LLMProvider
 from scheduling_agent.logging_config import get_logger
 
+from .schemas import LLMSchedulingParseResult
+
 logger = get_logger(__name__)
+
 
 class NLPProcessor:
     """Parses natural language scheduling queries using LLM."""
@@ -41,10 +41,8 @@ class NLPProcessor:
             logger.debug(f"Attempting LLM parse for query: '{query}'")
             try:
                 llm_result = await self.llm_provider.parse_scheduling_query(query)
-            except Exception as e:
-                logger.error(
-                    f"LLM provider raised an exception: {e}", exc_info=True
-                )
+            except Exception:
+                logger.exception("LLM provider raised an exception")
                 # Fall through to llm_result is None logic
 
         # Handle LLM Failure or Absence
@@ -54,25 +52,24 @@ class NLPProcessor:
             failure_model = LLMSchedulingParseResult(
                 intent="unknown",
                 confidence=0.0,
-                method="failure" # Indicates complete LLM failure or absence
+                method="failure",  # Indicates complete LLM failure or absence
                 # date_info and filters will use their default_factory
             )
             logger.info(
                 "NLP parsing complete (failure)",
                 intent=failure_model.intent,
-                method=failure_model.method
+                method=failure_model.method,
             )
             # Return the Pydantic model directly
             return failure_model
 
         # Handle Successful LLM Response (including provider's internal fallbacks)
-        logger.info(
-            "NLP parsing complete", intent=llm_result.intent, method=llm_result.method
-        )
+        logger.info("NLP parsing complete", intent=llm_result.intent, method=llm_result.method)
 
         # Return the Pydantic model directly, no conversion to dict
         return llm_result
 
     # --- Removed _extract_filters and _determine_query_intent methods --- #
 
-# End of file 
+
+# End of file

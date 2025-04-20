@@ -1,11 +1,10 @@
-import pytest
-from datetime import datetime, timezone, timedelta
-import uuid
+from datetime import UTC, datetime, timedelta
 
-from sqlmodel import SQLModel, create_engine, Session, Field, select
+import pytest
+from sqlmodel import Session, SQLModel, create_engine, select
 
 # Import the actual models
-from scheduling_agent.db.models import Event, Participant, ExcludedDate, ModifiedInstance
+from scheduling_agent.db.models import Event, ExcludedDate, ModifiedInstance, Participant
 
 # In-memory SQLite engine for testing
 # Use a different name to avoid potential conflicts if tests are run in parallel
@@ -13,12 +12,14 @@ from scheduling_agent.db.models import Event, Participant, ExcludedDate, Modifie
 # Using check_same_thread=False for simplicity in testing setup
 engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
 
-@pytest.fixture(scope="function", autouse=True)
+
+@pytest.fixture(autouse=True)
 def create_test_tables():
     """Create tables before each test function and drop them after."""
     SQLModel.metadata.create_all(engine)
     yield
     SQLModel.metadata.drop_all(engine)
+
 
 @pytest.fixture(name="session")
 def session_fixture():
@@ -26,11 +27,12 @@ def session_fixture():
     with Session(engine) as session:
         yield session
 
+
 def test_create_simple_event(session: Session):
     """Test creating a basic Event instance with naive UTC datetimes."""
     # Define start/end times with timezone info initially
-    start_aware = datetime(2024, 1, 1, 10, 0, 0, tzinfo=timezone.utc)
-    end_aware = datetime(2024, 1, 1, 11, 0, 0, tzinfo=timezone.utc)
+    start_aware = datetime(2024, 1, 1, 10, 0, 0, tzinfo=UTC)
+    end_aware = datetime(2024, 1, 1, 11, 0, 0, tzinfo=UTC)
 
     # Application logic would convert to naive UTC before saving
     start_naive_utc = start_aware.replace(tzinfo=None)
@@ -38,9 +40,9 @@ def test_create_simple_event(session: Session):
 
     event_data = {
         "title": "Test Meeting",
-        "start_time": start_naive_utc, # Store naive UTC
-        "end_time": end_naive_utc,     # Store naive UTC
-        "time_zone": "America/New_York", # Store original timezone separately
+        "start_time": start_naive_utc,  # Store naive UTC
+        "end_time": end_naive_utc,  # Store naive UTC
+        "time_zone": "America/New_York",  # Store original timezone separately
         "location": "Conference Room A",
     }
 
@@ -73,9 +75,10 @@ def test_create_simple_event(session: Session):
     assert isinstance(db_event.updated_at, datetime)
 
     # Check that created_at/updated_at are recent (naive UTC)
-    now_naive_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    now_naive_utc = datetime.now(UTC).replace(tzinfo=None)
     assert now_naive_utc - db_event.created_at < timedelta(seconds=5)
     assert now_naive_utc - db_event.updated_at < timedelta(seconds=5)
+
 
 def test_create_event_with_participants(session: Session):
     """Test creating an event and associating participants with it."""
@@ -94,7 +97,7 @@ def test_create_event_with_participants(session: Session):
     )
     session.add(event)
     session.commit()
-    session.refresh(event) # Get the generated event ID
+    session.refresh(event)  # Get the generated event ID
 
     # Create and link participants
     for identifier in participant_ids:
@@ -119,6 +122,7 @@ def test_create_event_with_participants(session: Session):
     assert participant_1 is not None
     assert participant_1.event == retrieved_event
     assert participant_1.event_id == retrieved_event.id
+
 
 def test_create_event_with_rrule(session: Session):
     """Test creating an event with a recurrence rule."""
@@ -146,12 +150,13 @@ def test_create_event_with_rrule(session: Session):
     assert retrieved_event.rrule == rrule_str
     assert retrieved_event.location is None
 
+
 def test_create_excluded_date_for_event(session: Session):
     """Test creating an ExcludedDate for a recurring event."""
     start_naive_utc = datetime(2024, 4, 1, 10, 0, 0)
     end_naive_utc = datetime(2024, 4, 1, 11, 0, 0)
     rrule_str = "FREQ=DAILY;COUNT=5"
-    exclusion_date_naive_utc = datetime(2024, 4, 3, 0, 0, 0) # Exclude the 3rd occurrence
+    exclusion_date_naive_utc = datetime(2024, 4, 3, 0, 0, 0)  # Exclude the 3rd occurrence
 
     # --- Act ---
     # Create a recurring event
@@ -167,10 +172,7 @@ def test_create_excluded_date_for_event(session: Session):
     session.refresh(event)
 
     # Create an excluded date for that event
-    excluded_date = ExcludedDate(
-        event_id=event.id,
-        excluded_date=exclusion_date_naive_utc
-    )
+    excluded_date = ExcludedDate(event_id=event.id, excluded_date=exclusion_date_naive_utc)
     session.add(excluded_date)
     session.commit()
 
@@ -187,11 +189,12 @@ def test_create_excluded_date_for_event(session: Session):
     # Check back-population from ExcludedDate
     assert retrieved_exclusion.event == retrieved_event
 
+
 def test_create_modified_instance_for_event(session: Session):
     """Test creating a ModifiedInstance for a recurring event."""
     # --- Arrange ---
     # Base recurring event (e.g., weekly meeting)
-    base_start_naive_utc = datetime(2024, 5, 6, 13, 0, 0) # Monday May 6th
+    base_start_naive_utc = datetime(2024, 5, 6, 13, 0, 0)  # Monday May 6th
     base_end_naive_utc = datetime(2024, 5, 6, 14, 0, 0)
     rrule_str = "FREQ=WEEKLY;BYDAY=MO;COUNT=4"
 
@@ -209,7 +212,7 @@ def test_create_modified_instance_for_event(session: Session):
 
     # Modify the second instance (May 13th)
     original_instance_date_naive_utc = datetime(2024, 5, 13, 0, 0, 0)
-    modified_start_naive_utc = datetime(2024, 5, 13, 13, 30, 0) # Move 30 mins later
+    modified_start_naive_utc = datetime(2024, 5, 13, 13, 30, 0)  # Move 30 mins later
     modified_end_naive_utc = datetime(2024, 5, 13, 14, 30, 0)
 
     modified_instance = ModifiedInstance(
@@ -217,9 +220,9 @@ def test_create_modified_instance_for_event(session: Session):
         original_date=original_instance_date_naive_utc,
         start_time=modified_start_naive_utc,
         end_time=modified_end_naive_utc,
-        time_zone="America/Denver", # Keep same timezone for this test
-        title="Weekly Planning (Shifted)", # Give it a new title
-        location="Virtual Only" # Change location
+        time_zone="America/Denver",  # Keep same timezone for this test
+        title="Weekly Planning (Shifted)",  # Give it a new title
+        location="Virtual Only",  # Change location
     )
 
     # --- Act ---
@@ -239,10 +242,11 @@ def test_create_modified_instance_for_event(session: Session):
     assert retrieved_modification.time_zone == "America/Denver"
     assert retrieved_modification.title == "Weekly Planning (Shifted)"
     assert retrieved_modification.location == "Virtual Only"
-    assert retrieved_modification.notes is None # Notes weren't set
+    assert retrieved_modification.notes is None  # Notes weren't set
 
     # Check back-population
     assert retrieved_modification.event == retrieved_event
+
 
 # TODO: Add tests for:
 # - Event with excluded dates (requires ExcludedDate model test)
@@ -258,4 +262,4 @@ def test_create_modified_instance_for_event(session: Session):
 # - Default values (created_at, updated_at, id)
 # - Updating an event (updated_at changes)
 # - Relationship loading (e.g., event.participants)
-# - Constraints (e.g., unique constraints if any) 
+# - Constraints (e.g., unique constraints if any)

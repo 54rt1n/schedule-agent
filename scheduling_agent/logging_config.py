@@ -1,9 +1,11 @@
 import logging
 import sys
+
 import structlog
 
 # Import settings
 from scheduling_agent.settings import settings
+
 
 def setup_logging():
     """Configure logging using structlog."""
@@ -14,13 +16,11 @@ def setup_logging():
         level = logging.getLevelName(log_level)
         # Ensure level is an int, getLevelName can return string if name is invalid
         if not isinstance(level, int):
-             print(f"Invalid LOG_LEVEL '{settings.log_level}'. Defaulting to INFO.", file=sys.stderr)
-             level = logging.INFO
-             log_level = "INFO" # Update string version too
+            level = logging.INFO
+            log_level = "INFO"  # Update string version too
     except ValueError:
-        print(f"Invalid LOG_LEVEL '{settings.log_level}'. Defaulting to INFO.", file=sys.stderr)
         level = logging.INFO
-        log_level = "INFO" # Update string version too
+        log_level = "INFO"  # Update string version too
 
     # Timestamper, key_order, and other structlog processors
     shared_processors = [
@@ -34,7 +34,8 @@ def setup_logging():
     ]
 
     structlog.configure(
-        processors=shared_processors + [
+        processors=shared_processors
+        + [
             structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
         ],
         logger_factory=structlog.stdlib.LoggerFactory(),
@@ -66,12 +67,7 @@ def setup_logging():
     logger = structlog.get_logger("scheduling_agent")
     logger.info("Logging configured", log_level=log_level)
 
+
 def get_logger(name: str) -> structlog.stdlib.BoundLogger:
     """Get a structlog logger instance."""
     return structlog.get_logger(name)
-
-# Example usage:
-# from scheduling_agent.core.logging_config import setup_logging, get_logger
-# setup_logging()
-# logger = get_logger(__name__)
-# logger.info("This is an info message", data={"key": "value"}) 

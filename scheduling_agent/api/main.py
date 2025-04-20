@@ -1,44 +1,47 @@
+import json  # Import json
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
-from fastapi.exceptions import RequestValidationError # Import for handling 422
-import json # Import json
-from typing import Any, Tuple, Optional, Dict
+from typing import Any
 
-from scheduling_agent.api.routes import well_known, rpc
-from scheduling_agent.logging_config import setup_logging, get_logger
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError  # Import for handling 422
+from fastapi.responses import JSONResponse
+
+from scheduling_agent.api.middleware.auth import APIKeyAuthMiddleware
+from scheduling_agent.api.routes import rpc, well_known
 from scheduling_agent.common.types import (
-    JSONRPCResponse as A2AJSONRPCResponse, # Avoid naming conflict with fastapi.responses.JSONResponse
     InternalError,
-    ParseError,
     InvalidRequestError,
-    CancelTaskParams, # For future on_cancel_task
-    JSONRPCResponse,
+    ParseError,
 )
+from scheduling_agent.common.types import (
+    JSONRPCResponse as A2AJSONRPCResponse,  # Avoid naming conflict with fastapi.responses.JSONResponse
+)
+from scheduling_agent.core.conflict_resolver import ConflictResolver
+from scheduling_agent.core.date_utils import DateUtils
+from scheduling_agent.core.exceptions import NLPError
+from scheduling_agent.core.exporters.ical_exporter import ICalExporter
+from scheduling_agent.core.exporters.orgmode_exporter import OrgModeExporter
+from scheduling_agent.core.llm_provider import LLMProvider
+from scheduling_agent.core.nlp_processor import NLPProcessor
+
+# Import db engine/session factory creation functions
+from scheduling_agent.db.database import create_db_engine, create_session_factory
 
 # Import actual exceptions directly
 from scheduling_agent.db.exceptions import DatabaseError
-from scheduling_agent.core.exceptions import NLPError
+from scheduling_agent.db.service import DatabaseService
+from scheduling_agent.logging_config import get_logger, setup_logging
+from scheduling_agent.settings import settings
 
 # Import components needed for lifespan initialization
 from scheduling_agent.task_manager import SchedulingTaskManager
-from scheduling_agent.core.date_utils import DateUtils
-from scheduling_agent.core.llm_provider import LLMProvider
-from scheduling_agent.core.nlp_processor import NLPProcessor
-from scheduling_agent.db.service import DatabaseService
-from scheduling_agent.core.conflict_resolver import ConflictResolver
-from scheduling_agent.core.exporters.base import CalendarExporter
-from scheduling_agent.core.exporters.ical_exporter import ICalExporter
-from scheduling_agent.core.exporters.orgmode_exporter import OrgModeExporter
-# Import db engine/session factory creation functions
-from scheduling_agent.db.database import create_db_engine, create_session_factory
-from scheduling_agent.settings import settings
+
 
 # --- Helper Function for Error Handling ---
-async def _get_request_details(request: Request) -> Tuple[Optional[Any], Optional[Dict[str, Any]]]:
+async def _get_request_details(request: Request) -> tuple[Any | None, dict[str, Any] | None]:
     """Attempts to parse the request body to get JSON-RPC ID and params."""
-    request_id: Optional[Any] = None
-    params: Optional[Dict[str, Any]] = None
+    request_id: Any | None = None
+    params: dict[str, Any] | None = None
     try:
         raw_body = await request.body()
         body_json = json.loads(raw_body.decode())
@@ -52,21 +55,30 @@ async def _get_request_details(request: Request) -> Tuple[Optional[Any], Optiona
         if "Receive channel has not been made available" in str(re):
             logger.warning(
                 "Could not re-read request body in error handler (likely already consumed)",
-                request_url=request.url.path
+                request_url=request.url.path,
             )
             # Cannot reliably get ID or params in this case, return None
             return None, None
-        else:
-            # Re-raise other RuntimeErrors
-            logger.error("Unexpected RuntimeError reading request body in error handler", exc_info=re, request_url=request.url.path)
-            raise re
+        # Re-raise other RuntimeErrors
+        logger.exception(
+            "Unexpected RuntimeError reading request body in error handler",
+            exc_info=re,
+            request_url=request.url.path,
+        )
+        raise
     except Exception as e:
-        logger.error("Unexpected error reading request body in error handler", exc_info=e, request_url=request.url.path)
+        logger.exception(
+            "Unexpected error reading request body in error handler",
+            exc_info=e,
+            request_url=request.url.path,
+        )
     return request_id, params
+
 
 # Configure logging early
 setup_logging()
 logger = get_logger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -83,8 +95,7 @@ async def lifespan(app: FastAPI):
     # LLMProvider uses settings internally
     app.state.llm_provider = LLMProvider()
     app.state.nlp_processor = NLPProcessor(
-        date_utils=app.state.date_utils,
-        llm_provider=app.state.llm_provider
+        date_utils=app.state.date_utils, llm_provider=app.state.llm_provider
     )
     logger.info("Core utilities (DateUtils, LLMProvider, NLPProcessor) initialized.")
 
@@ -98,8 +109,7 @@ async def lifespan(app: FastAPI):
 
     # 4. Conflict Resolver (needs db_service)
     app.state.conflict_resolver = ConflictResolver(
-        db_service=app.state.db_service,
-        date_utils=app.state.date_utils
+        db_service=app.state.db_service, date_utils=app.state.date_utils
     )
     # Now inject it back into db_service
     app.state.db_service.conflict_resolver = app.state.conflict_resolver
@@ -108,7 +118,7 @@ async def lifespan(app: FastAPI):
     # 5. Exporters
     app.state.exporters = {
         "ics": ICalExporter(date_utils=app.state.date_utils),
-        "org": OrgModeExporter(date_utils=app.state.date_utils)
+        "org": OrgModeExporter(date_utils=app.state.date_utils),
     }
     logger.info("Calendar exporters initialized.")
 
@@ -118,7 +128,7 @@ async def lifespan(app: FastAPI):
         nlp_processor=app.state.nlp_processor,
         db_service=app.state.db_service,
         conflict_resolver=app.state.conflict_resolver,
-        exporters=app.state.exporters
+        exporters=app.state.exporters,
     )
     logger.info("SchedulingTaskManager initialized.")
 
@@ -126,11 +136,12 @@ async def lifespan(app: FastAPI):
     yield
     # Clean up resources on shutdown
     logger.info("Lifespan shutdown: Cleaning up resources...")
-    if hasattr(app.state, 'db_engine') and app.state.db_engine:
+    if hasattr(app.state, "db_engine") and app.state.db_engine:
         await app.state.db_engine.dispose()
         logger.info("Database engine disposed.")
     # Add other cleanup if needed
     logger.info("Lifespan shutdown complete.")
+
 
 app = FastAPI(
     title="A2A Scheduling Agent",
@@ -140,10 +151,10 @@ app = FastAPI(
 )
 
 # --- Add Middleware ---
-from scheduling_agent.api.middleware.auth import APIKeyAuthMiddleware
 app.add_middleware(APIKeyAuthMiddleware)
 
 # --- Centralized Error Handlers (Phase 3, Task 2) ---
+
 
 @app.exception_handler(DatabaseError)
 async def database_exception_handler(request: Request, exc: DatabaseError):
@@ -154,9 +165,12 @@ async def database_exception_handler(request: Request, exc: DatabaseError):
     error_data = {"taskId": task_id, "details": str(exc)}
     a2a_error = InternalError(message="An internal database error occurred.", data=error_data)
     return JSONResponse(
-        status_code=200, # JSON-RPC errors usually use 200 OK
-        content=A2AJSONRPCResponse(id=request_id, error=a2a_error.as_jsonrpc_error()).model_dump(exclude_none=True)
+        status_code=200,  # JSON-RPC errors usually use 200 OK
+        content=A2AJSONRPCResponse(id=request_id, error=a2a_error.as_jsonrpc_error()).model_dump(
+            exclude_none=True
+        ),
     )
+
 
 @app.exception_handler(NLPError)
 async def nlp_exception_handler(request: Request, exc: NLPError):
@@ -168,8 +182,11 @@ async def nlp_exception_handler(request: Request, exc: NLPError):
     a2a_error = InternalError(message="An internal NLP processing error occurred.", data=error_data)
     return JSONResponse(
         status_code=200,
-        content=A2AJSONRPCResponse(id=request_id, error=a2a_error.as_jsonrpc_error()).model_dump(exclude_none=True)
+        content=A2AJSONRPCResponse(id=request_id, error=a2a_error.as_jsonrpc_error()).model_dump(
+            exclude_none=True
+        ),
     )
+
 
 # Handler for FastAPI's validation errors (e.g., invalid JSON, missing required fields in body)
 @app.exception_handler(RequestValidationError)
@@ -178,7 +195,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     # This includes invalid JSON, or valid JSON that doesn't match the top-level Pydantic model (JSONRPCRequest).
 
     raw_body_str = "<Could not read body>"
-    request_id = None # Initialize request_id
+    request_id = None  # Initialize request_id
     is_json_decode_error = False
     try:
         raw_body = await request.body()
@@ -188,11 +205,15 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             body_json = json.loads(raw_body_str)
             request_id = body_json.get("id")
         except json.JSONDecodeError:
-            is_json_decode_error = True # Mark as JSON decode failure
-            logger.error("JSONDecodeError caught by validation handler", body=raw_body_str, request_url=request.url.path)
+            is_json_decode_error = True  # Mark as JSON decode failure
+            logger.exception(
+                "JSONDecodeError caught by validation handler",
+                body=raw_body_str,
+                request_url=request.url.path,
+            )
             # Fall through to return ParseError below
     except Exception as e:
-        logger.error("Error reading request body in validation handler", exc_info=e)
+        logger.exception("Error reading request body in validation handler", exc_info=e)
 
     # Log the validation error details
     logger.error(
@@ -200,7 +221,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         errors=exc.errors(),
         body=raw_body_str,
         request_url=request.url.path,
-        determined_request_id=request_id
+        determined_request_id=request_id,
     )
 
     # Now determine the correct JSON-RPC error based on validation details
@@ -213,8 +234,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         error_details = exc.errors()
         is_invalid_rpc_structure = any(
             # Check if the error location points specifically to 'method' or 'jsonrpc' within the body
-            err.get('loc') == ('body', 'method') or 
-            err.get('loc') == ('body', 'jsonrpc')
+            err.get("loc") == ("body", "method") or err.get("loc") == ("body", "jsonrpc")
             for err in error_details
         )
 
@@ -222,7 +242,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             # Missing or invalid top-level JSON-RPC fields (method, jsonrpc)
             a2a_error = InvalidRequestError(
                 message="Invalid JSON-RPC request structure (e.g., missing 'method' or invalid 'jsonrpc').",
-                data=error_details
+                data=error_details,
             )
         else:
             # Other validation errors (e.g., type errors in top-level fields like 'id', general structure issues)
@@ -230,7 +250,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             # Map these to ParseError according to A2A spec (failure to parse the request).
             a2a_error = ParseError(
                 message="Failed to parse request into valid JSON-RPC structure (e.g., invalid field type).",
-                data=error_details
+                data=error_details,
             )
 
     # Try to get ID even in parse error, if possible (already attempted above)
@@ -238,9 +258,12 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         logger.warning("Could not determine request ID during ParseError handling.")
 
     return JSONResponse(
-        status_code=200, # Use 200 for JSON-RPC errors
-        content=A2AJSONRPCResponse(id=request_id, error=a2a_error.as_jsonrpc_error()).model_dump(exclude_none=True)
+        status_code=200,  # Use 200 for JSON-RPC errors
+        content=A2AJSONRPCResponse(id=request_id, error=a2a_error.as_jsonrpc_error()).model_dump(
+            exclude_none=True
+        ),
     )
+
 
 # Generic fallback handler
 @app.exception_handler(Exception)
@@ -248,53 +271,63 @@ async def generic_exception_handler(request: Request, exc: Exception):
     """Catches any unhandled exception and returns a standard A2A InternalError."""
     # Log the original exception first
     logger.exception(
-        "Unhandled generic Exception caught by handler", # Restored original log message
-        exc_info=exc, # Let logger format the traceback
-        request_url=request.url.path
+        "Unhandled generic Exception caught by handler",  # Restored original log message
+        exc_info=exc,  # Let logger format the traceback
+        request_url=request.url.path,
     )
 
     # Restore original logic with inner try/except
     request_id = None
     task_id = None
-    error_details = f"Unhandled exception of type {type(exc).__name__}: {str(exc)}"
+    error_details = f"Unhandled exception of type {type(exc).__name__}: {exc!s}"
 
     try:
         # Best effort to get request details for context, but don't let this fail the handler
         request_id, params = await _get_request_details(request)
         if isinstance(params, dict):
-            task_id = params.get("id") # Use "id" from params for task_id
+            task_id = params.get("id")  # Use "id" from params for task_id
 
         # Prepare the A2A error structure
         error_data = {"taskId": task_id, "details": error_details}
-        a2a_error = InternalError(message="An unexpected internal server error occurred.", data=error_data)
-        response_content = A2AJSONRPCResponse(id=request_id, error=a2a_error.as_jsonrpc_error()).model_dump(exclude_none=True)
+        a2a_error = InternalError(
+            message="An unexpected internal server error occurred.", data=error_data
+        )
+        response_content = A2AJSONRPCResponse(
+            id=request_id, error=a2a_error.as_jsonrpc_error()
+        ).model_dump(exclude_none=True)
 
     except Exception as handler_exc:
         # If getting details or formatting response fails, log *that* error
         # and return a very generic InternalError
-        logger.error(
+        logger.exception(
             "Error occurred *within* the generic exception handler itself",
             handler_error=str(handler_exc),
             original_exception=error_details,
             request_url=request.url.path,
-            exc_info=handler_exc
+            exc_info=handler_exc,
         )
-        fallback_error = InternalError(message="An unexpected internal server error occurred.", data={"details": error_details})
-        response_content = A2AJSONRPCResponse(id=None, error=fallback_error.as_jsonrpc_error()).model_dump(exclude_none=True)
+        fallback_error = InternalError(
+            message="An unexpected internal server error occurred.", data={"details": error_details}
+        )
+        response_content = A2AJSONRPCResponse(
+            id=None, error=fallback_error.as_jsonrpc_error()
+        ).model_dump(exclude_none=True)
         # Ensure request_id is None if we failed to get it
         request_id = None
 
     # Always return a JSONResponse, even if generating the content failed above
     return JSONResponse(
-        status_code=200, # JSON-RPC errors usually use 200 OK
+        status_code=200,  # JSON-RPC errors usually use 200 OK
         content=response_content,
     )
 
-# --- Routers --- 
+
+# --- Routers ---
 
 # Include routers AFTER error handlers are defined
 app.include_router(well_known.router, prefix="/.well-known", tags=["Well-Known"])
 app.include_router(rpc.router, prefix="/api/rpc", tags=["JSON-RPC"])
+
 
 @app.get("/", tags=["Status"])
 async def read_root():
@@ -303,4 +336,4 @@ async def read_root():
 
 
 # TODO: Set up Dependency Injection (Phase 1, Task 1)
-# See api/dependencies.py 
+# See api/dependencies.py

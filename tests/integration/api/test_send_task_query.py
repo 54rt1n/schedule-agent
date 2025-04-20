@@ -1,24 +1,24 @@
-import pytest
-import pytest_asyncio
-import httpx
 import uuid
 from unittest.mock import AsyncMock, MagicMock
 
-# Import fixtures from conftest
-from .conftest import RPC_URL
+import httpx
+import pytest
 
 # Import necessary types
 from scheduling_agent.common.types import (
     JSONRPCRequest,
-    TaskSendParams,
-    TaskState,
-    Task,
-    TaskStatus,
     Message,
     Part,
-    Artifact,
+    Task,
+    TaskSendParams,
+    TaskState,
+    TaskStatus,
 )
-from scheduling_agent.core.schemas import LLMSchedulingParseResult, LLMDateInfo
+from scheduling_agent.core.schemas import LLMDateInfo, LLMSchedulingParseResult
+
+# Import fixtures from conftest
+from .conftest import RPC_URL
+
 
 @pytest.mark.asyncio
 async def test_send_task_query_success(
@@ -26,7 +26,7 @@ async def test_send_task_query_success(
     mock_db_service: AsyncMock,
     mock_task_manager: MagicMock,
     mock_nlp_processor: AsyncMock,
-    mock_conflict_resolver: AsyncMock, # Required by handler
+    mock_conflict_resolver: AsyncMock,  # Required by handler
 ):
     """Test tasks/send for querying the schedule successfully (natural language input)."""
     request_id = str(uuid.uuid4())
@@ -35,8 +35,7 @@ async def test_send_task_query_success(
 
     # Mock NLP result for query intent
     mock_nlp_result = LLMSchedulingParseResult(
-        intent="query_events",
-        date_info=LLMDateInfo(start_date="tomorrow", end_date="tomorrow")
+        intent="query_events", date_info=LLMDateInfo(start_date="tomorrow", end_date="tomorrow")
     )
     mock_nlp_processor.parse_natural_language_query.return_value = mock_nlp_result
 
@@ -49,18 +48,19 @@ async def test_send_task_query_success(
         sessionId=None,
         status=TaskStatus(
             state=TaskState.COMPLETED,
-            message=Message(role="agent", parts=[Part(type="text", text="No events found matching your query.")]) # Adjusted message
+            message=Message(
+                role="agent", parts=[Part(type="text", text="No events found matching your query.")]
+            ),  # Adjusted message
         ),
         params=None,
-        artifacts=[], # No artifact expected if no events found
-        history=[]
+        artifacts=[],  # No artifact expected if no events found
+        history=[],
     )
     mock_task_manager.complete_task.return_value = final_task
 
     # Prepare the natural language input for the query
     params = TaskSendParams(
-        id=task_id,
-        message=Message(role="user", parts=[Part(type="text", text=query)])
+        id=task_id, message=Message(role="user", parts=[Part(type="text", text=query)])
     )
     rpc_request = JSONRPCRequest(
         jsonrpc="2.0",
@@ -86,13 +86,14 @@ async def test_send_task_query_success(
 
     assert result_task_data.get("id") == expected_task_data.get("id")
     assert result_task_data.get("status", {}).get("state") == TaskState.COMPLETED.value
-    assert len(result_task_data.get("artifacts", [])) == 0 # Check for no artifacts
+    assert len(result_task_data.get("artifacts", [])) == 0  # Check for no artifacts
 
     # Assert mock calls
     mock_task_manager.create_task.assert_called_once()
     mock_nlp_processor.parse_natural_language_query.assert_awaited_once_with(query)
     mock_db_service.query_events.assert_awaited_once()
     mock_task_manager.complete_task.assert_awaited_once()
+
 
 @pytest.mark.asyncio
 async def test_rpc_tasks_send_unclear_intent(
@@ -106,14 +107,10 @@ async def test_rpc_tasks_send_unclear_intent(
     request_id = str(uuid.uuid4())
     task_id = str(uuid.uuid4())
     params = TaskSendParams(
-        id=task_id,
-        message=Message(role="user", parts=[Part(type="text", text="test")])
+        id=task_id, message=Message(role="user", parts=[Part(type="text", text="test")])
     )
     rpc_request = JSONRPCRequest(
-        jsonrpc="2.0",
-        method="tasks/send",
-        params=params.model_dump(),
-        id=request_id
+        jsonrpc="2.0", method="tasks/send", params=params.model_dump(), id=request_id
     )
 
     # Mock the final task state returned by task_manager.require_input_task
@@ -121,9 +118,17 @@ async def test_rpc_tasks_send_unclear_intent(
         id=task_id,
         status=TaskStatus(
             state=TaskState.INPUT_REQUIRED,
-            message=Message(role="agent", parts=[Part(type="text", text="I wasn't sure what you wanted to do. Could you please rephrase your request?")])
+            message=Message(
+                role="agent",
+                parts=[
+                    Part(
+                        type="text",
+                        text="I wasn't sure what you wanted to do. Could you please rephrase your request?",
+                    )
+                ],
+            ),
         ),
-        artifacts=[]
+        artifacts=[],
     )
     mock_task_manager.require_input_task.return_value = final_task
 
@@ -153,4 +158,4 @@ async def test_rpc_tasks_send_unclear_intent(
     mock_nlp_processor.parse_natural_language_query.assert_awaited_once_with("test")
     mock_task_manager.require_input_task.assert_awaited_once()
     mock_task_manager.complete_task.assert_not_called()
-    mock_task_manager.fail_task.assert_not_called() 
+    mock_task_manager.fail_task.assert_not_called()

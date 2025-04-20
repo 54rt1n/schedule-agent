@@ -1,21 +1,22 @@
 """Provides an interface to interact with Language Models (LLMs)."""
 
-import os
 import json
-from typing import Any, Dict, List, Union, Optional
-from datetime import datetime, timedelta, timezone
-from pydantic import ValidationError
+from datetime import UTC, datetime
+from typing import Any
+
+import dateparser
 
 # Required imports
 import openai
-import dateparser
+from pydantic import ValidationError
 
-from scheduling_agent.logging_config import get_logger
 from scheduling_agent.core.schemas import (
-    LLMSchedulingParseResult,
     LLMDateInfo,
     LLMFilters,
+    LLMSchedulingParseResult,
 )
+from scheduling_agent.logging_config import get_logger
+
 # Import settings
 from scheduling_agent.settings import settings
 
@@ -31,9 +32,9 @@ class LLMProvider:
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
-        model: Optional[str] = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        model: str | None = None,
     ):
         """
         Initialize the LLM provider.
@@ -65,15 +66,11 @@ class LLMProvider:
             logger.warning("OpenAI API key not provided via init or settings.llm_api_key env var.")
 
         try:
-            self.client = openai.AsyncClient(
-                api_key=self.api_key,
-                base_url=self.base_url
-            )
+            self.client = openai.AsyncClient(api_key=self.api_key, base_url=self.base_url)
             logger.info(f"OpenAI client initialized for model {self.model} at {self.base_url}")
         except Exception as e:
-            logger.error(f"Failed to initialize required OpenAI client: {e}", exc_info=True)
+            logger.exception("Failed to initialize required OpenAI client")
             raise RuntimeError(f"Failed to initialize required OpenAI client: {e}") from e
-
 
     async def parse_scheduling_query(self, query: str) -> LLMSchedulingParseResult:
         """Parse a full natural language query using LLM and Pydantic validation."""
@@ -81,7 +78,7 @@ class LLMProvider:
         # Note: Prompt includes dynamic current_date and the user_query
         system_prompt = f"""
         You are an intelligent scheduling assistant. Your task is to parse a user's natural language query related to calendar events and extract structured information.
-        The current date is {datetime.now(timezone.utc).date().isoformat()}.
+        The current date is {datetime.now(UTC).date().isoformat()}.
 
         Analyze the query: "{query}"
 
@@ -124,8 +121,8 @@ class LLMProvider:
         {{
           "intent": "create_event",
           "date_info": {{
-            "start_date": "{datetime.now(timezone.utc).date().isoformat()}", // Example: Today's date if "tomorrow" relative base is today
-            "end_date": "{datetime.now(timezone.utc).date().isoformat()}", // Example: Same date
+            "start_date": "{datetime.now(UTC).date().isoformat()}", // Example: Today's date if "tomorrow" relative base is today
+            "end_date": "{datetime.now(UTC).date().isoformat()}", // Example: Same date
             "specific_time": "15:00:00",
             "time_description": "tomorrow at 3pm"
           }},
@@ -139,48 +136,60 @@ class LLMProvider:
 
         If crucial information like date/time for creation is missing, reflect that in the output (e.g., missing date_info fields) but still determine the likely intent.
         If the query is ambiguous or lacks scheduling details, set intent to 'unknown' and confidence lower.
-        """ # No .format() needed, using f-string directly
+        """  # No .format() needed, using f-string directly
 
         # Attempt to get raw JSON dict from LLM
         raw_llm_result = await self._generate_json(system_prompt, query)
-        validated_result: Optional[LLMSchedulingParseResult] = None
+        validated_result: LLMSchedulingParseResult | None = None
 
         if isinstance(raw_llm_result, dict):
             try:
                 # Attempt to validate the raw dictionary using the Pydantic model
                 validated_result = LLMSchedulingParseResult.model_validate(raw_llm_result)
                 # No need to manually re-instantiate nested models if model_validate works correctly
-                validated_result.method = 'llm' # Mark method as LLM
-                logger.info("Successfully parsed and validated LLM response.", intent=validated_result.intent)
+                validated_result.method = "llm"  # Mark method as LLM
+                logger.info(
+                    "Successfully parsed and validated LLM response.",
+                    intent=validated_result.intent,
+                )
                 return validated_result
             except ValidationError as e:
-                logger.warning(f"LLM response failed Pydantic validation: {e}", llm_output=raw_llm_result)
+                logger.warning(
+                    f"LLM response failed Pydantic validation: {e}", llm_output=raw_llm_result
+                )
                 # Fall through to fallback logic if validation fails
-            except Exception as e:
-                 logger.error(f"Unexpected error during Pydantic validation: {e}", llm_output=raw_llm_result, exc_info=True)
-                 # Fall through to fallback
+            except Exception:
+                logger.exception(
+                    "Unexpected error during Pydantic validation",
+                    llm_output=raw_llm_result,
+                )
+                # Fall through to fallback
         else:
-            logger.warning("LLM did not return a dictionary. Attempting fallback.", result=raw_llm_result)
+            logger.warning(
+                "LLM did not return a dictionary. Attempting fallback.", result=raw_llm_result
+            )
             # Fall through to fallback logic
 
         # --- Fallback Logic --- #
         logger.info("Proceeding with fallback logic after LLM failure or validation error.")
         fallback_date_info_dict = self._get_fallback_date_result(query)
-        fallback_method = fallback_date_info_dict.get('method', 'fallback_failure')
+        fallback_method = fallback_date_info_dict.get("method", "fallback_failure")
         # Create a default LLMSchedulingParseResult for fallback
         fallback_result = LLMSchedulingParseResult(
             intent="unknown",
             # Populate date_info using the fallback dictionary, ensure it's a DateInfo model
-            date_info=LLMDateInfo.model_validate(fallback_date_info_dict) if fallback_date_info_dict else LLMDateInfo(),
-            filters=LLMFilters(), # Default empty filters
-            confidence=0.2, # Hardcoded low confidence for fallback
-            method=fallback_method
+            date_info=LLMDateInfo.model_validate(fallback_date_info_dict)
+            if fallback_date_info_dict
+            else LLMDateInfo(),
+            filters=LLMFilters(),  # Default empty filters
+            confidence=0.2,  # Hardcoded low confidence for fallback
+            method=fallback_method,
         )
         return fallback_result
 
     async def _generate_json(
         self, system_prompt: str, user_message: str
-    ) -> Optional[Union[Dict[str, Any], List[Any]]]:
+    ) -> dict[str, Any] | list[Any] | None:
         """Internal helper to call the LLM and parse its JSON response.
         Returns None if any error occurs.
         """
@@ -191,14 +200,16 @@ class LLMProvider:
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_message}
+                    {"role": "user", "content": user_message},
                 ],
-                temperature=0, # For deterministic JSON generation
-                response_format={"type": "json_object"} # Request JSON output
+                temperature=0,  # For deterministic JSON generation
+                response_format={"type": "json_object"},  # Request JSON output
             )
 
             if not response.choices or not response.choices[0].message:
-                logger.warning("LLM response structure missing expected parts (choices or message).")
+                logger.warning(
+                    "LLM response structure missing expected parts (choices or message)."
+                )
                 return None
 
             content = response.choices[0].message.content
@@ -210,38 +221,38 @@ class LLMProvider:
                 parsed_json = json.loads(content)
                 logger.debug("Successfully parsed JSON from LLM.")
                 # Add method marker if it's a dictionary and missing
-                if isinstance(parsed_json, dict) and 'method' not in parsed_json:
-                    parsed_json['method'] = 'llm'
+                if isinstance(parsed_json, dict) and "method" not in parsed_json:
+                    parsed_json["method"] = "llm"
                 return parsed_json
             except json.JSONDecodeError as json_err:
                 logger.warning(f"Invalid JSON received from LLM: {json_err}", raw_content=content)
-                return None # Failed to parse
+                return None  # Failed to parse
 
-        except openai.APIConnectionError as e:
-            logger.error(f"LLM API connection error: {e}")
+        except openai.APIConnectionError:
+            logger.exception("LLM API connection error")
             return None
-        except openai.RateLimitError as e:
-            logger.error(f"LLM API rate limit exceeded: {e}")
+        except openai.RateLimitError:
+            logger.exception("LLM API rate limit exceeded")
             # Consider adding retry logic here with backoff
             return None
-        except openai.AuthenticationError as e: # Catch specific auth error
-            logger.error(f"LLM API authentication error: {e}")
+        except openai.AuthenticationError:  # Catch specific auth error
+            logger.exception("LLM API authentication error")
             return None
         except openai.APIStatusError as e:
-            logger.error(f"LLM API status error: {e.status_code}", response=e.response)
+            logger.exception(f"LLM API status error: {e.status_code}", response=e.response)
             return None
-        except Exception as e:
-            logger.error(f"Unexpected error during LLM API call: {e}", exc_info=True)
+        except Exception:
+            logger.exception("Unexpected error during LLM API call")
             return None
 
-    def _get_fallback_date_result(self, query: str) -> Dict[str, Any]:
+    def _get_fallback_date_result(self, query: str) -> dict[str, Any]:
         """Fallback date parsing using dateparser when LLM fails or is unavailable."""
         logger.warning("Falling back to dateparser for query", query=query)
         try:
             # Settings to prefer future dates and use current time as reference
             parser_settings = {
-                'PREFER_DATES_FROM': 'future',
-                'RELATIVE_BASE': datetime.now(timezone.utc)
+                "PREFER_DATES_FROM": "future",
+                "RELATIVE_BASE": datetime.now(UTC),
                 # Consider adding TIMEZONE setting if user timezone is known
                 # 'TIMEZONE': 'Your/Timezone' # Example
             }
@@ -250,33 +261,32 @@ class LLMProvider:
             if parsed_date:
                 # Ensure the result is timezone-aware (UTC)
                 if parsed_date.tzinfo is None:
-                    parsed_date = parsed_date.replace(tzinfo=timezone.utc)
+                    parsed_date = parsed_date.replace(tzinfo=UTC)
                 else:
-                    parsed_date = parsed_date.astimezone(timezone.utc)
+                    parsed_date = parsed_date.astimezone(UTC)
 
                 date_iso = parsed_date.date().isoformat()
                 return {
                     "start_date": date_iso,
-                    "end_date": date_iso, # Assume single day for basic fallback
-                    "confidence": 0.6, # Indicate lower confidence
-                    "method": "fallback_dateparser"
+                    "end_date": date_iso,  # Assume single day for basic fallback
+                    "confidence": 0.6,  # Indicate lower confidence
+                    "method": "fallback_dateparser",
                 }
-            else:
-                logger.warning("dateparser failed to parse query", query=query)
-                # Last resort - return today
-                today_iso = datetime.now(timezone.utc).date().isoformat()
-                return {
-                    "start_date": today_iso,
-                    "end_date": today_iso,
-                    "confidence": 0.3,
-                    "method": "fallback_default"
-                }
-        except Exception as e:
-            logger.error(f"Error during dateparser fallback: {e}", exc_info=True)
-            today_iso = datetime.now(timezone.utc).date().isoformat()
+            logger.warning("dateparser failed to parse query", query=query)
+            # Last resort - return today
+            today_iso = datetime.now(UTC).date().isoformat()
+            return {
+                "start_date": today_iso,
+                "end_date": today_iso,
+                "confidence": 0.3,
+                "method": "fallback_default",
+            }
+        except Exception:
+            logger.exception("Error during dateparser fallback")
+            today_iso = datetime.now(UTC).date().isoformat()
             return {
                 "start_date": today_iso,
                 "end_date": today_iso,
                 "confidence": 0.1,
-                "method": "fallback_error"
-            } 
+                "method": "fallback_error",
+            }
