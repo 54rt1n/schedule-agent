@@ -1,6 +1,7 @@
 import pytest
 import json
-from unittest.mock import patch, AsyncMock
+from unittest.mock import patch, AsyncMock, ANY, MagicMock
+from datetime import datetime, timezone, timedelta
 
 # Assuming openai might not be installed in all test environments
 try:
@@ -205,6 +206,78 @@ async def test_unit_parse_scheduling_query_api_error(
 
 @pytest.mark.asyncio
 @patch('openai.AsyncClient', new_callable=AsyncMock)
+async def test_unit_parse_scheduling_query_rate_limit_error(
+    mock_async_client_class: AsyncMock, llm_provider: LLMProvider
+):
+    """Unit test fallback logic when LLM API call raises a RateLimitError."""
+    query = "Another meeting"
+
+    # Check if openai module and specific error are available
+    api_error = None
+    if openai and hasattr(openai, 'RateLimitError'):
+        # RateLimitError requires a response and body
+        mock_response = MagicMock()
+        mock_response.status_code = 429
+        api_error = openai.RateLimitError(
+            message="Rate limit exceeded",
+            response=mock_response,
+            body={"error": {"code": "rate_limit_exceeded"}}
+        )
+
+    # Simulate LLM failure by raising the error
+    mock_client_instance = AsyncMock()
+    mock_client_instance.chat.completions.create = AsyncMock(side_effect=api_error)
+    llm_provider.client = mock_client_instance
+
+    # Call the method under test
+    result = await llm_provider.parse_scheduling_query(query)
+
+    # Assertions: Expect fallback behavior
+    assert result is not None
+    mock_client_instance.chat.completions.create.assert_awaited_once() # LLM call attempted
+    assert result.method == "fallback_default"
+    assert result.intent == "unknown"
+    assert result.confidence == 0.2
+
+
+@pytest.mark.asyncio
+@patch('openai.AsyncClient', new_callable=AsyncMock)
+async def test_unit_parse_scheduling_query_authentication_error(
+    mock_async_client_class: AsyncMock, llm_provider: LLMProvider
+):
+    """Unit test fallback logic when LLM API call raises an AuthenticationError."""
+    query = "Secret meeting"
+
+    # Check if openai module and specific error are available
+    api_error = None
+    if openai and hasattr(openai, 'AuthenticationError'):
+        # AuthenticationError requires a response and body
+        mock_response = MagicMock()
+        mock_response.status_code = 401
+        api_error = openai.AuthenticationError(
+            message="Incorrect API key provided",
+            response=mock_response,
+            body={"error": {"code": "invalid_api_key"}}
+        )
+
+    # Simulate LLM failure by raising the error
+    mock_client_instance = AsyncMock()
+    mock_client_instance.chat.completions.create = AsyncMock(side_effect=api_error)
+    llm_provider.client = mock_client_instance
+
+    # Call the method under test
+    result = await llm_provider.parse_scheduling_query(query)
+
+    # Assertions: Expect fallback behavior
+    assert result is not None
+    mock_client_instance.chat.completions.create.assert_awaited_once() # LLM call attempted
+    assert result.method == "fallback_default"
+    assert result.intent == "unknown"
+    assert result.confidence == 0.2
+
+
+@pytest.mark.asyncio
+@patch('openai.AsyncClient', new_callable=AsyncMock)
 async def test_unit_parse_scheduling_query_invalid_json(
     mock_async_client_class: AsyncMock, llm_provider: LLMProvider
 ):
@@ -246,3 +319,130 @@ async def test_unit_parse_scheduling_query_invalid_json(
 # - LLM returning invalid JSON
 # - Different intents being parsed correctly from mock LLM response
 # - Cases where only filters are found, or only date_info
+
+# --- Tests for _get_fallback_date_result --- #
+
+@patch('scheduling_agent.core.llm_provider.dateparser.parse')
+def test_unit_fallback_date_result_success(mock_dateparser_parse, llm_provider: LLMProvider):
+    """Unit test _get_fallback_date_result successful parsing."""
+    query = "Meeting next Tuesday at 5pm"
+    # Mock dateparser.parse to return a specific datetime
+    mock_dt = datetime(2024, 6, 11, 17, 0, 0, tzinfo=timezone.utc)
+    mock_dateparser_parse.return_value = mock_dt
+
+    result_dict = llm_provider._get_fallback_date_result(query)
+
+    mock_dateparser_parse.assert_called_once()
+    assert result_dict == {
+        "start_date": "2024-06-11",
+        "end_date": "2024-06-11",
+        "confidence": 0.6,
+        "method": "fallback_dateparser"
+    }
+
+@patch('scheduling_agent.core.llm_provider.dateparser.parse')
+def test_unit_fallback_date_result_parse_fail(mock_dateparser_parse, llm_provider: LLMProvider):
+    """Unit test _get_fallback_date_result when dateparser fails to parse."""
+    query = "Some random text without dates"
+    # Mock dateparser.parse to return None (failure)
+    mock_dateparser_parse.return_value = None
+
+    # Use freezegun or similar if exact date matters, otherwise check structure
+    today_iso = datetime.now(timezone.utc).date().isoformat()
+
+    result_dict = llm_provider._get_fallback_date_result(query)
+
+    mock_dateparser_parse.assert_called_once()
+    assert result_dict == {
+        "start_date": today_iso,
+        "end_date": today_iso,
+        "confidence": 0.3,
+        "method": "fallback_default"
+    }
+
+@patch('scheduling_agent.core.llm_provider.dateparser.parse')
+def test_unit_fallback_date_result_exception(mock_dateparser_parse, llm_provider: LLMProvider):
+    """Unit test _get_fallback_date_result when dateparser raises an exception."""
+    query = "Data that causes issues"
+    # Mock dateparser.parse to raise an exception
+    mock_dateparser_parse.side_effect = ValueError("Parsing error")
+
+    # Use freezegun or similar if exact date matters, otherwise check structure
+    today_iso = datetime.now(timezone.utc).date().isoformat()
+
+    result_dict = llm_provider._get_fallback_date_result(query)
+
+    mock_dateparser_parse.assert_called_once()
+    assert result_dict == {
+        "start_date": today_iso,
+        "end_date": today_iso,
+        "confidence": 0.1,
+        "method": "fallback_error"
+    }
+
+# --- Tests for parse_scheduling_query using fallback --- #
+
+@pytest.mark.asyncio
+@patch('scheduling_agent.core.llm_provider.LLMProvider._generate_json')
+@patch('scheduling_agent.core.llm_provider.LLMProvider._get_fallback_date_result')
+async def test_unit_parse_scheduling_query_uses_fallback_on_llm_failure(
+    mock_fallback, mock_generate_json, llm_provider: LLMProvider
+):
+    """Verify fallback is called when _generate_json returns None."""
+    query = "Schedule lunch"
+    mock_generate_json.return_value = None # Simulate LLM failure
+
+    # Mock the fallback return value
+    fallback_return = {
+        "start_date": "2024-07-01",
+        "end_date": "2024-07-01",
+        "method": "fallback_dateparser"
+    }
+    mock_fallback.return_value = fallback_return
+
+    result = await llm_provider.parse_scheduling_query(query)
+
+    mock_generate_json.assert_awaited_once_with(ANY, query)
+    mock_fallback.assert_called_once_with(query)
+
+    assert result.method == "fallback_dateparser"
+    assert result.intent == "unknown"
+    assert result.confidence == 0.2
+    assert result.date_info.start_date == "2024-07-01"
+    assert result.date_info.end_date == "2024-07-01"
+
+@pytest.mark.asyncio
+@patch('scheduling_agent.core.llm_provider.LLMProvider._generate_json')
+@patch('scheduling_agent.core.llm_provider.LLMProvider._get_fallback_date_result')
+async def test_unit_parse_scheduling_query_uses_fallback_on_validation_error(
+    mock_fallback, mock_generate_json, llm_provider: LLMProvider
+):
+    """Verify fallback is called when LLM response fails Pydantic validation."""
+    query = "Book meeting for tomorrow"
+    # Simulate LLM returning invalid structure (invalid type for confidence)
+    llm_output = {
+        "intent": "create_event", # Provide intent but make confidence invalid
+        "date_info": {"start_date": "2024-07-02"},
+        "confidence": "not-a-float" # Invalid type
+    }
+    mock_generate_json.return_value = llm_output
+
+    # Mock the fallback return value
+    fallback_return = {
+        "start_date": "2024-07-02",
+        "end_date": "2024-07-02",
+        "method": "fallback_dateparser",
+        "confidence": 0.6 # Not used directly by parse_scheduling_query
+    }
+    mock_fallback.return_value = fallback_return
+
+    result = await llm_provider.parse_scheduling_query(query)
+
+    mock_generate_json.assert_awaited_once_with(ANY, query)
+    mock_fallback.assert_called_once_with(query)
+
+    assert result.method == "fallback_dateparser"
+    assert result.intent == "unknown"
+    assert result.confidence == 0.2 # Fallback confidence overrides LLM/fallback confidence
+    assert result.date_info.start_date == "2024-07-02"
+    assert result.date_info.end_date == "2024-07-02"

@@ -11,6 +11,8 @@ from .conftest import RPC_URL, BASE_URL # Import BASE_URL for well-known
 from scheduling_agent.common.types import JSONRPCRequest
 # Import middleware module to patch its settings
 from scheduling_agent.api.middleware import auth as auth_middleware
+# Import AgentCard and get_agent_card for validation
+from scheduling_agent.agent_card import AgentCard, get_agent_card
 
 # --- Fixture to Enable Auth for these Tests ---
 
@@ -95,27 +97,32 @@ async def test_rpc_endpoint_valid_bearer_token(async_client: httpx.AsyncClient, 
 
 @pytest.mark.asyncio
 async def test_well_known_endpoint_no_auth_needed(async_client: httpx.AsyncClient):
-    """Test that the /.well-known/ endpoint is accessible without authentication."""
-    # Assuming /.well-known/agent.json exists or is handled
-    # We might need to mock the actual endpoint handler if it depends on things
-    # or just test that we don't get a 401/403.
-    well_known_url = "/.well-known/agent.json" # Adjust if path is different
-
-    # Override the specific endpoint if necessary to prevent other errors
-    # from fastapi import FastAPI
-    # from scheduling_agent.api.main import app
-    # async def mock_well_known(): return {"name": "Test Agent"}
-    # original_well_known = app.routes # Requires more complex route finding/override
-    # app.get(well_known_url)(mock_well_known) # Simplified override example
+    """Test that the /.well-known/agent.json endpoint is accessible without authentication and returns the correct AgentCard."""
+    well_known_url = "/.well-known/agent.json"
 
     response = await async_client.get(well_known_url)
 
-    # Expect success (200) or potentially Not Found (404) if not implemented,
-    # but crucially NOT 401 or 403.
-    assert response.status_code != 401
-    assert response.status_code != 403
-    # For now, accept 200 or 404
-    assert response.status_code in [200, 404] # Adjust expected code if endpoint is implemented
+    # Expect success (200) and validate content
+    assert response.status_code == 200
 
-    # Restore original route if overridden (needs proper implementation)
-    # app.routes = original_well_known 
+    # Validate the response against the AgentCard model and content
+    response_data = response.json()
+    expected_card_data = get_agent_card().model_dump()
+
+    # Check if the response data is a valid AgentCard (basic structure check)
+    try:
+        AgentCard(**response_data)
+    except Exception as e:
+        pytest.fail(f"Response data is not a valid AgentCard: {e}")
+
+    # Compare key fields (adjust keys based on your actual AgentCard definition)
+    assert response_data["name"] == expected_card_data["name"]
+    assert response_data["description"] == expected_card_data["description"]
+    # Compare URL as strings to handle potential HttpUrl type from Pydantic
+    assert response_data["url"] == str(expected_card_data["url"])
+    assert response_data["version"] == expected_card_data["version"]
+    assert response_data["capabilities"] == expected_card_data["capabilities"]
+    assert response_data["skills"] == expected_card_data["skills"]
+    # Add more specific checks if needed, e.g., for nested structures
+    # The line below was removed as AgentCapabilities has no nested 'jsonrpc' key
+    # assert response_data["capabilities"]["jsonrpc"]["methods"] == expected_card_data["capabilities"]["jsonrpc"]["methods"] 

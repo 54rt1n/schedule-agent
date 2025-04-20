@@ -3,40 +3,59 @@ import pytest_asyncio
 import httpx
 from unittest.mock import AsyncMock, MagicMock, patch
 import uuid
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Generator
+from fastapi import FastAPI
 
 # Import the app instance and dependency getters
-from scheduling_agent.api.main import app
+from scheduling_agent.api.main import app as main_app
 from scheduling_agent.api.dependencies import (
     get_db_service,
     get_task_manager,
     get_conflict_resolver,
-    get_nlp_processor
+    get_nlp_processor,
+    get_date_utils,
+    get_exporters,
 )
 # Import middleware module to patch its settings
 from scheduling_agent.api.middleware import auth as auth_middleware
+# Import settings to patch
+from scheduling_agent.settings import settings
+
+# Import test_db_url fixture from root conftest
+from tests.conftest import test_db_url
 
 # Import types and services for mock specs
 from scheduling_agent.db.service import DatabaseService
 from scheduling_agent.task_manager import SchedulingTaskManager
 from scheduling_agent.core.conflict_resolver import ConflictResolver
 from scheduling_agent.core.nlp_processor import NLPProcessor
+from scheduling_agent.core.date_utils import DateUtils
+from scheduling_agent.core.exporters.base import CalendarExporter
 from scheduling_agent.common.types import Task, TaskStatus, TaskState
 from scheduling_agent.core.schemas import LLMSchedulingParseResult, LLMDateInfo
-
 
 # Constants used by tests
 BASE_URL = "http://test"
 RPC_URL = "/api/rpc/" # Ensure consistent path
 
+# --- NEW Fixture for App with Patched Settings ---
+
+@pytest.fixture(scope="function")
+def test_app(test_db_url: str) -> Generator[FastAPI, None, None]:
+    """
+    Provides the FastAPI app instance with the database URL patched
+    to use the in-memory test database for the duration of a test function.
+    """
+    original_db_url = settings.database_url
+    with patch.object(settings, 'database_url', test_db_url):
+        yield main_app
+
 # --- Core Fixtures ---
 
 @pytest_asyncio.fixture(scope="function") # Function scope for client to ensure clean state
-async def async_client() -> AsyncGenerator[httpx.AsyncClient, None]:
+async def async_client(test_app: FastAPI) -> AsyncGenerator[httpx.AsyncClient, None]:
     """Provides a standard, unauthenticated httpx client configured for the FastAPI app."""
-    # Transport needs to be created within the async context
-    transport = httpx.ASGITransport(app=app)
-    # NO default headers
+    transport = httpx.ASGITransport(app=test_app)
     async with httpx.AsyncClient(transport=transport, base_url=BASE_URL) as client:
         yield client
 
@@ -48,22 +67,22 @@ def mock_db_service() -> AsyncMock:
     mock = AsyncMock(spec=DatabaseService)
     mock.create_event = AsyncMock()
     mock.query_events = AsyncMock()
-    mock.get_events_in_range = AsyncMock(return_value=[]) # Default for exporter tests later
+    mock.get_events_in_range = AsyncMock(return_value=[])
+    mock.date_utils = MagicMock(spec=DateUtils)
+    mock.conflict_resolver = MagicMock(spec=ConflictResolver)
     return mock
 
 @pytest.fixture(scope="function")
-def mock_task_manager() -> MagicMock: # TaskManager methods used by handlers are async now
+def mock_task_manager() -> MagicMock:
     """Provides a function-scoped MagicMock for SchedulingTaskManager."""
     mock = MagicMock(spec=SchedulingTaskManager)
-    # Configure necessary async methods primarily used by handlers
     mock.create_task = AsyncMock(return_value=Task(id=str(uuid.uuid4()), status=TaskStatus(state=TaskState.WORKING)))
-    mock.get_task = AsyncMock(return_value=None) # Default to not found
-    mock.update_task_status = AsyncMock(return_value=Task(id=str(uuid.uuid4()), status=TaskStatus(state=TaskState.WORKING))) # Placeholder
-    mock.add_task_artifact = AsyncMock(return_value=Task(id=str(uuid.uuid4()), status=TaskStatus(state=TaskState.WORKING))) # Placeholder
+    mock.get_task = AsyncMock(return_value=None)
+    mock.update_task_status = AsyncMock(return_value=Task(id=str(uuid.uuid4()), status=TaskStatus(state=TaskState.WORKING)))
+    mock.add_task_artifact = AsyncMock(return_value=Task(id=str(uuid.uuid4()), status=TaskStatus(state=TaskState.WORKING)))
     mock.complete_task = AsyncMock(return_value=Task(id=str(uuid.uuid4()), status=TaskStatus(state=TaskState.COMPLETED)))
     mock.fail_task = AsyncMock(return_value=Task(id=str(uuid.uuid4()), status=TaskStatus(state=TaskState.FAILED)))
     mock.require_input_task = AsyncMock(return_value=Task(id=str(uuid.uuid4()), status=TaskStatus(state=TaskState.INPUT_REQUIRED)))
-    # Add cancel_task mock for Phase 4
     mock.cancel_task = AsyncMock(return_value=Task(id=str(uuid.uuid4()), status=TaskStatus(state=TaskState.CANCELED)))
     return mock
 
@@ -71,7 +90,6 @@ def mock_task_manager() -> MagicMock: # TaskManager methods used by handlers are
 def mock_nlp_processor() -> AsyncMock:
     """Provides a function-scoped AsyncMock for NLPProcessor."""
     mock = AsyncMock(spec=NLPProcessor)
-    # Default parse result for basic tests
     mock.parse_natural_language_query = AsyncMock(
         return_value=LLMSchedulingParseResult(
             intent="unknown",
@@ -84,34 +102,70 @@ def mock_nlp_processor() -> AsyncMock:
 def mock_conflict_resolver() -> AsyncMock:
     """Provides a function-scoped AsyncMock for ConflictResolver."""
     mock = AsyncMock(spec=ConflictResolver)
-    mock.generate_alternative_times = AsyncMock(return_value=[]) # Default empty list
+    mock.generate_alternative_times = AsyncMock(return_value=[])
     return mock
+
+@pytest.fixture(scope="function")
+def mock_date_utils() -> MagicMock:
+    """Provides a function-scoped MagicMock for DateUtils."""
+    return MagicMock(spec=DateUtils)
+
+# --- Mock Exporter Fixture (Configured) ---
+@pytest.fixture(scope="function")
+def mock_exporters() -> MagicMock:
+    """Provides a function-scoped MagicMock for the exporters dictionary,
+    configured to return specific exporter mocks via .get()."""
+    # Create specific mock instances for each exporter type needed
+    mock_ical = MagicMock(spec=CalendarExporter)
+    # Explicitly create the mock methods before setting return_value
+    mock_ical.export = MagicMock(return_value="BEGIN:VCALENDAR...END:VCALENDAR")
+    mock_ical.get_mime_type = MagicMock(return_value="text/calendar")
+
+    mock_org = MagicMock(spec=CalendarExporter)
+    mock_org.export = MagicMock(return_value="* Event 1\n* Event 2")
+    mock_org.get_mime_type = MagicMock(return_value="text/plain")
+
+    # Create the main dictionary mock
+    exporters_dict_mock = MagicMock(spec=dict)
+
+    # Configure the .get() method
+    def get_side_effect(key, default=None):
+        if key == 'ics':
+            return mock_ical
+        elif key == 'org':
+            return mock_org
+        else:
+            return default
+
+    exporters_dict_mock.get.side_effect = get_side_effect
+
+    return exporters_dict_mock
 
 
 # --- Auto-use Fixture for Dependency Overrides ---
 
 @pytest.fixture(scope="function", autouse=True)
 def apply_mock_dependencies(
+    test_app: FastAPI,
     mock_db_service: AsyncMock,
-    mock_task_manager: MagicMock, # Keep as MagicMock if spec uses sync methods internally
+    mock_task_manager: MagicMock,
     mock_nlp_processor: AsyncMock,
     mock_conflict_resolver: AsyncMock,
+    mock_date_utils: MagicMock,
+    mock_exporters: MagicMock,
 ):
-    """Automatically overrides FastAPI dependencies for each test function.
+    """Automatically overrides FastAPI dependencies for each test function
+    using the app instance provided by the test_app fixture.
     Auth key patching is now handled specifically in test_auth.py.
     """
-    # --- DO NOT Patch Auth Keys Globally Here --- 
-    # test_api_keys = {"test-key-1", "test-key-2"}
-    # with patch.object(auth_middleware, 'VALID_API_KEYS', test_api_keys):
-    
-    # --- Override FastAPI Dependencies ---
-    original_overrides = app.dependency_overrides.copy()
-    app.dependency_overrides[get_db_service] = lambda: mock_db_service
-    app.dependency_overrides[get_task_manager] = lambda: mock_task_manager
-    app.dependency_overrides[get_nlp_processor] = lambda: mock_nlp_processor
-    app.dependency_overrides[get_conflict_resolver] = lambda: mock_conflict_resolver
-    
-    yield # Run the test
+    original_overrides = test_app.dependency_overrides.copy()
+    test_app.dependency_overrides[get_db_service] = lambda: mock_db_service
+    test_app.dependency_overrides[get_task_manager] = lambda: mock_task_manager
+    test_app.dependency_overrides[get_nlp_processor] = lambda: mock_nlp_processor
+    test_app.dependency_overrides[get_conflict_resolver] = lambda: mock_conflict_resolver
+    test_app.dependency_overrides[get_date_utils] = lambda: mock_date_utils
+    test_app.dependency_overrides[get_exporters] = lambda: mock_exporters
 
-    # --- Restore Overrides ---
-    app.dependency_overrides = original_overrides 
+    yield
+
+    test_app.dependency_overrides = original_overrides 

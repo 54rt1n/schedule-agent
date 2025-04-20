@@ -8,20 +8,23 @@ from sqlalchemy import event
 from sqlmodel import SQLModel # Though not used directly here, needed for metadata later
 from dotenv import load_dotenv
 
+# Import settings object
+from scheduling_agent.settings import settings
 # Corrected import path for logging_config
 from scheduling_agent.logging_config import get_logger
 
-# Load environment variables from .env file
+# Load environment variables from .env file (keep for other potential vars)
 load_dotenv()
 
 logger = get_logger(__name__)
 
-# --- Database Configuration Function ---
-def get_database_url() -> str:
-    """Gets the database URL from environment variables."""
-    return os.environ.get(
-        "DATABASE_URL", "sqlite+aiosqlite:///./schedule_agent.db"
-    )
+# --- Database Configuration Function (Removed) ---
+# (Now using settings.database_url directly)
+# def get_database_url() -> str:
+#     """Gets the database URL from environment variables."""
+#     return os.environ.get(
+#         "DATABASE_URL", "sqlite+aiosqlite:///./schedule_agent.db"
+#     )
 
 # --- Engine Creation Function ---
 def create_db_engine(db_url: str) -> AsyncEngine:
@@ -30,7 +33,8 @@ def create_db_engine(db_url: str) -> AsyncEngine:
     try:
         engine = create_async_engine(
             db_url,
-            echo=os.environ.get("DB_ECHO", "False").lower() == "true",
+            # Use settings.log_level to control echo
+            echo=settings.log_level.upper() == "DEBUG",
             future=True,
             connect_args=connect_args,
             pool_pre_ping=True,
@@ -106,6 +110,7 @@ async def initialize_database(engine: AsyncEngine):
 #         return item 
 
 # --- Create engine and session factory instances for import ---
-db_url = get_database_url()
+# Use settings.database_url
+db_url = settings.database_url
 engine = create_db_engine(db_url)
 async_session_factory = create_session_factory(engine) 

@@ -1,13 +1,26 @@
 import logging
 import sys
-import os
 import structlog
+
+# Import settings
+from scheduling_agent.settings import settings
 
 def setup_logging():
     """Configure logging using structlog."""
 
-    log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
-    level = logging.getLevelName(log_level)
+    # Use settings.log_level
+    log_level = settings.log_level.upper()
+    try:
+        level = logging.getLevelName(log_level)
+        # Ensure level is an int, getLevelName can return string if name is invalid
+        if not isinstance(level, int):
+             print(f"Invalid LOG_LEVEL '{settings.log_level}'. Defaulting to INFO.", file=sys.stderr)
+             level = logging.INFO
+             log_level = "INFO" # Update string version too
+    except ValueError:
+        print(f"Invalid LOG_LEVEL '{settings.log_level}'. Defaulting to INFO.", file=sys.stderr)
+        level = logging.INFO
+        log_level = "INFO" # Update string version too
 
     # Timestamper, key_order, and other structlog processors
     shared_processors = [

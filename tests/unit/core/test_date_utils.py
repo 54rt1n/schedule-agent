@@ -248,7 +248,7 @@ def test_expand_recurrence_with_modification(date_utils: DateUtils):
     # Start time should be the modified one, normalized to aware UTC
     assert mod_instance_data['start_time'] == mod_start_dt.replace(tzinfo=timezone.utc)
     assert mod_instance_data['end_time'] == mod_end_dt.replace(tzinfo=timezone.utc)
-    assert mod_instance_data['modified_instance_id'] is not None # Should have the mod ID
+    assert mod_instance_data['modified_instance_id'] is not None
 
     # Check a non-modified instance (May 6th)
     non_mod_instance_data = next((occ for occ in occurrences if occ['start_time'].date() == datetime(2024, 5, 6).date()), None)
@@ -257,6 +257,87 @@ def test_expand_recurrence_with_modification(date_utils: DateUtils):
     assert non_mod_instance_data['location'] == base_event.location
     assert non_mod_instance_data['start_time'] == start_dt # Original start time
     assert non_mod_instance_data['modified_instance_id'] is None
+
+def test_expand_recurrence_until(date_utils: DateUtils):
+    """Test expanding recurrence with an UNTIL clause."""
+    # Arrange: Daily event starting 2024-07-15 9am UTC, repeating until July 20th (exclusive)
+    start_dt = datetime(2024, 7, 15, 9, 0, 0, tzinfo=timezone.utc)
+    end_dt = datetime(2024, 7, 15, 10, 0, 0, tzinfo=timezone.utc)
+    # UNTIL is inclusive according to RFC5545. The time part is important.
+    # UNTIL=20240720T000000Z means the last possible *start* time must be <= this value.
+    # Since our event starts at 9am, the occurrence on July 19th at 9am is allowed,
+    # but the one on July 20th at 9am is *not* because 9am > 0am.
+    rrule_str = "FREQ=DAILY;UNTIL=20240720T000000Z"
+    base_event = Event.model_validate({
+        "id": uuid.uuid4(), "title": "Daily Until July 20th",
+        "start_time": start_dt.replace(tzinfo=None),
+        "end_time": end_dt.replace(tzinfo=None),
+        "time_zone": "UTC", "rrule": rrule_str
+    })
+
+    range_start = datetime(2024, 7, 1, 0, 0, 0, tzinfo=timezone.utc)
+    range_end = datetime(2024, 7, 31, 0, 0, 0, tzinfo=timezone.utc)
+
+    # Act
+    occurrences = date_utils.expand_recurrence(
+        base_event=base_event,
+        range_start_utc=range_start,
+        range_end_utc=range_end,
+        excluded_dates=[],
+        modified_instances=[]
+    )
+
+    # Assert
+    assert len(occurrences) == 5 # July 15, 16, 17, 18, 19
+    occurrence_starts = sorted([occ['start_time'] for occ in occurrences])
+
+    expected_starts = [
+        datetime(2024, 7, 15, 9, 0, 0, tzinfo=timezone.utc),
+        datetime(2024, 7, 16, 9, 0, 0, tzinfo=timezone.utc),
+        datetime(2024, 7, 17, 9, 0, 0, tzinfo=timezone.utc),
+        datetime(2024, 7, 18, 9, 0, 0, tzinfo=timezone.utc),
+        datetime(2024, 7, 19, 9, 0, 0, tzinfo=timezone.utc),
+    ]
+    assert occurrence_starts == expected_starts
+
+def test_expand_recurrence_bysetpos(date_utils: DateUtils):
+    """Test expanding recurrence with a BYSETPOS rule (last Friday of month)."""
+    # Arrange: Event on the last Friday of the month at 2pm UTC, check over 3 months
+    start_dt = datetime(2024, 8, 30, 14, 0, 0, tzinfo=timezone.utc) # Initial start must be a valid instance (last Fri of Aug)
+    end_dt = datetime(2024, 8, 30, 15, 0, 0, tzinfo=timezone.utc)
+    # Last Friday of the month
+    rrule_str = "FREQ=MONTHLY;BYDAY=FR;BYSETPOS=-1"
+    base_event = Event.model_validate({
+        "id": uuid.uuid4(), "title": "Last Friday Drinks",
+        "start_time": start_dt.replace(tzinfo=None),
+        "end_time": end_dt.replace(tzinfo=None),
+        "time_zone": "UTC", "rrule": rrule_str
+    })
+
+    # Range covering Aug, Sep, Oct 2024
+    range_start = datetime(2024, 8, 1, 0, 0, 0, tzinfo=timezone.utc)
+    range_end = datetime(2024, 11, 1, 0, 0, 0, tzinfo=timezone.utc)
+
+    # Act
+    occurrences = date_utils.expand_recurrence(
+        base_event=base_event,
+        range_start_utc=range_start,
+        range_end_utc=range_end,
+        excluded_dates=[],
+        modified_instances=[]
+    )
+
+    # Assert
+    assert len(occurrences) == 3 # Last Fri of Aug, Sep, Oct
+    occurrence_starts = sorted([occ['start_time'] for occ in occurrences])
+
+    # Last Fridays in 2024: Aug 30, Sep 27, Oct 25
+    expected_starts = [
+        datetime(2024, 8, 30, 14, 0, 0, tzinfo=timezone.utc),
+        datetime(2024, 9, 27, 14, 0, 0, tzinfo=timezone.utc),
+        datetime(2024, 10, 25, 14, 0, 0, tzinfo=timezone.utc),
+    ]
+    assert occurrence_starts == expected_starts
 
 # --- DST Transition Tests (Phase 3, Task 4) ---
 
@@ -382,7 +463,141 @@ def test_expand_recurrence_dst_transitions(
     expected_utc_ends = [start + event_duration for start in expected_utc_starts]
     assert occurrence_end_times == expected_utc_ends
 
-# TODO: Add tests for expand_recurrence with:
-# - Modifications (ModifiedInstance) -> Added test
+# Test combining DST, Exclusions, and Modifications
+def test_expand_recurrence_dst_with_exclusion(date_utils: DateUtils):
+    """Test recurrence over DST with an exclusion after the transition."""
+    # Arrange: Daily event at 9am New York time, crossing spring forward
+    tz_name = "America/New_York"
+    event_local_start = datetime(2024, 3, 8, 9, 0, 0) # Fri 9am EST
+    event_duration = timedelta(hours=1)
+    rrule_str = "FREQ=DAILY;COUNT=5" # Fri, Sat, Sun, Mon, Tue
 
-# TODO: Add tests for normalize_to_utc, convert_from_utc, expand_recurrence etc. 
+    # Normalize the local start/end times to naive UTC
+    start_aware_utc = date_utils.normalize_to_utc(event_local_start, tz_name=tz_name)
+    start_naive_utc = start_aware_utc.replace(tzinfo=None)
+    end_naive_utc = (start_aware_utc + event_duration).replace(tzinfo=None)
+
+    base_event = Event.model_validate({
+        "id": uuid.uuid4(), "title": "DST Exclude Test",
+        "start_time": start_naive_utc,
+        "end_time": end_naive_utc,
+        "time_zone": tz_name,
+        "rrule": rrule_str
+    })
+
+    # Exclude Monday, March 11th (which is after the DST transition)
+    # Exclusion date stored as naive UTC midnight
+    excluded_date_local = datetime(2024, 3, 11, 0, 0, 0) # Naive local date
+    excluded_date_utc_aware = date_utils.normalize_to_utc(excluded_date_local, tz_name=tz_name)
+    excluded_date_naive_utc = excluded_date_utc_aware.date()
+    # ExcludedDate model expects a datetime, let's use midnight naive UTC for consistency
+    excluded_db_date = datetime.combine(excluded_date_naive_utc, datetime.min.time())
+
+    excluded = [ExcludedDate(event_id=base_event.id, excluded_date=excluded_db_date)]
+
+    range_start_utc = datetime(2024, 3, 8, 0, 0, 0, tzinfo=timezone.utc)
+    range_end_utc = datetime(2024, 3, 13, 0, 0, 0, tzinfo=timezone.utc)
+
+    # Act
+    occurrences = date_utils.expand_recurrence(
+        base_event=base_event,
+        range_start_utc=range_start_utc,
+        range_end_utc=range_end_utc,
+        excluded_dates=excluded,
+        modified_instances=[]
+    )
+
+    # Assert
+    assert len(occurrences) == 4 # 5 total minus 1 excluded (Mon Mar 11)
+    occurrence_start_times = sorted([occ['start_time'] for occ in occurrences])
+
+    expected_utc_starts = [
+        datetime(2024, 3, 8, 14, 0, 0, tzinfo=timezone.utc), # Fri 9am EST = 14:00 UTC
+        datetime(2024, 3, 9, 14, 0, 0, tzinfo=timezone.utc), # Sat 9am EST = 14:00 UTC
+        datetime(2024, 3, 10, 13, 0, 0, tzinfo=timezone.utc), # Sun 9am EDT = 13:00 UTC
+        # Monday March 11th is excluded
+        datetime(2024, 3, 12, 13, 0, 0, tzinfo=timezone.utc), # Tue 9am EDT = 13:00 UTC
+    ]
+    assert occurrence_start_times == expected_utc_starts
+
+def test_expand_recurrence_dst_with_modification(date_utils: DateUtils):
+    """Test recurrence over DST with a modification after the transition."""
+    # Arrange: Daily event at 9am New York time, crossing spring forward
+    tz_name = "America/New_York"
+    event_local_start = datetime(2024, 3, 8, 9, 0, 0) # Fri 9am EST
+    event_duration = timedelta(hours=1)
+    rrule_str = "FREQ=DAILY;COUNT=5" # Fri, Sat, Sun, Mon, Tue
+
+    # Normalize the local start/end times to naive UTC
+    start_aware_utc = date_utils.normalize_to_utc(event_local_start, tz_name=tz_name)
+    start_naive_utc = start_aware_utc.replace(tzinfo=None)
+    end_naive_utc = (start_aware_utc + event_duration).replace(tzinfo=None)
+
+    base_event = Event.model_validate({
+        "id": uuid.uuid4(), "title": "DST Mod Test Base",
+        "start_time": start_naive_utc,
+        "end_time": end_naive_utc,
+        "time_zone": tz_name,
+        "rrule": rrule_str
+    })
+
+    # Modify Monday, March 11th (which is after the DST transition)
+    # Original instance time (for lookup) would be 9am EDT = 13:00 UTC
+    original_instance_date_local = datetime(2024, 3, 11, 9, 0, 0) # Local time
+    original_instance_date_utc = date_utils.normalize_to_utc(original_instance_date_local, tz_name=tz_name)
+    original_instance_lookup_date = original_instance_date_utc.date()
+
+    # Define the modification details (e.g., push back by 30 mins, new title)
+    # Assume modification times are provided as *naive* local times for the modification's date
+    mod_start_local = datetime(2024, 3, 11, 9, 30, 0)
+    mod_end_local = mod_start_local + event_duration
+    mod_title = "Modified DST Event"
+
+    # Need ModifiedInstance model
+    from scheduling_agent.db.models import ModifiedInstance
+    modified = [ModifiedInstance(
+        event_id=base_event.id,
+        # original_date is the *date* part (naive UTC) for lookup
+        original_date=datetime.combine(original_instance_lookup_date, datetime.min.time()),
+        start_time=mod_start_local, # Store naive local time
+        end_time=mod_end_local,   # Store naive local time
+        time_zone=tz_name, # Store the TZ context for the modification
+        title=mod_title,
+    )]
+
+    range_start_utc = datetime(2024, 3, 8, 0, 0, 0, tzinfo=timezone.utc)
+    range_end_utc = datetime(2024, 3, 13, 0, 0, 0, tzinfo=timezone.utc)
+
+    # Act
+    occurrences = date_utils.expand_recurrence(
+        base_event=base_event,
+        range_start_utc=range_start_utc,
+        range_end_utc=range_end_utc,
+        excluded_dates=[],
+        modified_instances=modified
+    )
+
+    # Assert
+    assert len(occurrences) == 5 # Modification replaces an instance
+    occurrence_start_times = sorted([occ['start_time'] for occ in occurrences])
+
+    # Expected UTC start times:
+    # Fri Mar 8: 14:00 UTC (9am EST)
+    # Sat Mar 9: 14:00 UTC (9am EST)
+    # Sun Mar 10: 13:00 UTC (9am EDT) - DST Shift
+    # Mon Mar 11: 13:30 UTC (Modified from 9am EDT to 9:30am EDT)
+    # Tue Mar 12: 13:00 UTC (9am EDT)
+    expected_utc_starts = [
+        datetime(2024, 3, 8, 14, 0, 0, tzinfo=timezone.utc),
+        datetime(2024, 3, 9, 14, 0, 0, tzinfo=timezone.utc),
+        datetime(2024, 3, 10, 13, 0, 0, tzinfo=timezone.utc),
+        date_utils.normalize_to_utc(mod_start_local, tz_name=tz_name), # Modified Mon 9:30am EDT -> 13:30 UTC
+        datetime(2024, 3, 12, 13, 0, 0, tzinfo=timezone.utc),
+    ]
+    assert occurrence_start_times == expected_utc_starts
+
+    # Check the modified instance details
+    mod_instance_data = next((occ for occ in occurrences if occ['start_time'] == expected_utc_starts[3]), None)
+    assert mod_instance_data is not None
+    assert mod_instance_data['title'] == mod_title
+    assert mod_instance_data['modified_instance_id'] is not None

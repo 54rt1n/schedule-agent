@@ -17,8 +17,9 @@ from scheduling_agent.core.exporters.base import CalendarExporter # Base protoco
 from scheduling_agent.core.exporters.ical_exporter import ICalExporter
 from scheduling_agent.core.exporters.orgmode_exporter import OrgModeExporter
 from scheduling_agent.core.exceptions import ConflictError
-# Import Event model for artifacts and EventCreate for validation
-from scheduling_agent.db.models import Event, EventCreate
+# Import DB model from .models and DTO schema from .schemas
+from scheduling_agent.db.models import Event
+from scheduling_agent.db.schemas import EventCreate
 # Import DateUtils for placeholder parsing
 from scheduling_agent.core.date_utils import DateUtils
 # Import LLMSchedulingParseResult for type hinting

@@ -93,31 +93,32 @@ class ModifiedInstance(SQLModel, table=True):
     event: Event = Relationship(back_populates="modified_instances")
 
 # --- API Specific Models (Optional) ---
+# These have been moved to scheduling_agent/db/schemas.py
 # Example: Model for reading event data via API
-class EventRead(EventBase):
-    id: uuid.UUID
-    created_at: datetime
-    updated_at: datetime
-    # Add participant info if needed
-    # participants: List[ParticipantRead] = []
+# class EventRead(EventBase):
+#     id: uuid.UUID
+#     created_at: datetime
+#     updated_at: datetime
+#     # Add participant info if needed
+#     # participants: List[ParticipantRead] = []
 
 # Model for creating events via API
-class EventCreate(EventBase):
-    # Add any specific creation fields, e.g., participant identifiers
-    participant_identifiers: Optional[List[str]] = None
+# class EventCreate(EventBase):
+#     # Add any specific creation fields, e.g., participant identifiers
+#     participant_identifiers: Optional[List[str]] = None
 
 # Model for updating events via API (all fields optional)
-class EventUpdate(SQLModel):
-    title: Optional[str] = None
-    start_time: Optional[datetime] = None
-    end_time: Optional[datetime] = None
-    time_zone: Optional[str] = None
-    location: Optional[str] = None
-    notes: Optional[str] = None
-    rrule: Optional[str] = None
-    # How to handle participant updates? Add/remove lists?
-    # participant_identifiers_add: Optional[List[str]] = None
-    # participant_identifiers_remove: Optional[List[str]] = None
+# class EventUpdate(SQLModel):
+#     title: Optional[str] = None
+#     start_time: Optional[datetime] = None
+#     end_time: Optional[datetime] = None
+#     time_zone: Optional[str] = None
+#     location: Optional[str] = None
+#     notes: Optional[str] = None
+#     rrule: Optional[str] = None
+#     # How to handle participant updates? Add/remove lists?
+#     # participant_identifiers_add: Optional[List[str]] = None
+#     # participant_identifiers_remove: Optional[List[str]] = None
 
 # Add Read/Create/Update models if needed for API layer later
 # class EventRead(EventBase):

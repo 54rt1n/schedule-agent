@@ -1,12 +1,14 @@
 import pytest
 from datetime import datetime, timezone, timedelta, time
 from zoneinfo import ZoneInfo
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 import uuid
 
 from scheduling_agent.core.conflict_resolver import ConflictResolver
 from scheduling_agent.core.date_utils import DateUtils
-from scheduling_agent.db.models import Event, EventCreate # Use EventCreate for proposed event
+# Import DB model from .models and DTO schema from .schemas
+from scheduling_agent.db.models import Event
+from scheduling_agent.db.schemas import EventCreate
 # Mock the DatabaseService for these unit tests
 from scheduling_agent.db.service import DatabaseService
 
@@ -529,6 +531,102 @@ async def test_generate_alternatives_error_fetching_busy(conflict_resolver: Conf
 
     # Should return an empty list and log an error (logging check is harder in unit test)
     assert alternatives == [] 
+
+@pytest.mark.asyncio
+async def test_generate_alternatives_schedule_full(
+    conflict_resolver: ConflictResolver,
+    date_utils: DateUtils,
+    default_duration
+):
+    """Test generating alternatives when the schedule is fully booked."""
+    tz_str = "Europe/Berlin"
+    # Tuesday 11:00 AM Berlin (09:00 UTC)
+    start_dt_utc = datetime(2024, 6, 18, 9, 0, 0, tzinfo=timezone.utc)
+    proposed_event = EventCreate(
+        title="Impossible Event",
+        start_time=start_dt_utc,
+        end_time=start_dt_utc + default_duration,
+        time_zone=tz_str
+    )
+    conflicts = [{"event": MagicMock()}] # Assume conflicts detected
+
+    # Mock _get_busy_periods to return a block covering a long time
+    very_busy_start = start_dt_utc - timedelta(days=1)
+    very_busy_end = start_dt_utc + timedelta(days=30) # Cover search window
+    conflict_resolver._get_busy_periods = AsyncMock(return_value=[(very_busy_start, very_busy_end)])
+
+    # Mock the helper find methods to ensure they respect the busy period
+    conflict_resolver._find_next_available_slot_same_day = MagicMock(return_value=None)
+    conflict_resolver._find_next_business_day_slot = MagicMock(return_value=None)
+    conflict_resolver._find_available_slots = MagicMock(return_value=[])
+
+    alternatives = await conflict_resolver.generate_alternative_times(proposed_event, conflicts)
+
+    # Assert: No alternatives should be found
+    assert alternatives == []
+    # Verify busy periods were fetched
+    conflict_resolver._get_busy_periods.assert_awaited_once()
+    # Verify find helpers were called (they should be, even if they return None/[])
+    conflict_resolver._find_next_available_slot_same_day.assert_called_once()
+    conflict_resolver._find_next_business_day_slot.assert_called_once()
+    conflict_resolver._find_available_slots.assert_called_once()
+
+@pytest.mark.asyncio
+async def test_generate_alternatives_non_standard_hours(
+    conflict_resolver: ConflictResolver,
+    date_utils: DateUtils,
+    default_duration,
+    # We don't need default_business_hours/days fixtures here
+):
+    """Test generating alternatives with non-standard business hours/days."""
+    tz_str = "Asia/Tokyo"
+    # Tuesday 10:00 AM JST (01:00 UTC)
+    start_dt_utc = datetime(2024, 6, 18, 1, 0, 0, tzinfo=timezone.utc)
+    proposed_event = EventCreate(
+        title="Late Shift Meeting",
+        start_time=start_dt_utc,
+        end_time=start_dt_utc + default_duration,
+        time_zone=tz_str
+    )
+    conflicts = [{"event": MagicMock()}]
+
+    # Define non-standard hours/days
+    non_standard_hours = (time(10, 0), time(16, 0)) # 10am - 4pm
+    non_standard_days = [1, 2, 3, 4, 5] # Tue - Sat
+
+    # Mock _get_busy_periods to return empty
+    conflict_resolver._get_busy_periods = AsyncMock(return_value=[])
+
+    # Mock the find helpers to return dummy values
+    dummy_slot = datetime(2024, 6, 19, 1, 0, 0, tzinfo=timezone.utc) # Dummy Wed 10am JST
+    conflict_resolver._find_next_available_slot_same_day = MagicMock(return_value=None)
+    conflict_resolver._find_next_business_day_slot = MagicMock(return_value=dummy_slot)
+    conflict_resolver._find_available_slots = MagicMock(return_value=[])
+
+    # Act: Call the actual function and let it use its internal defaults
+    alternatives = await conflict_resolver.generate_alternative_times(proposed_event, conflicts)
+
+    # Assert that the find methods were called with the *default* hours/days
+    # This verifies the current state, highlighting the need for refactoring.
+    # Define expected default values used internally by the function
+    expected_default_bh_start = time(9, 0)
+    expected_default_bh_end = time(17, 0)
+    expected_default_biz_days = [0, 1, 2, 3, 4] # Mon-Fri
+
+    conflict_resolver._find_next_available_slot_same_day.assert_called_once_with(
+        start_dt_utc, default_duration, [],
+        expected_default_bh_start, expected_default_bh_end, expected_default_biz_days, tz_str
+    )
+    conflict_resolver._find_next_business_day_slot.assert_called_once_with(
+        start_dt_utc, default_duration, [],
+        expected_default_bh_start, expected_default_bh_end, expected_default_biz_days, tz_str
+    )
+    conflict_resolver._find_available_slots.assert_called_once_with(
+        start_dt_utc, default_duration, [],
+        expected_default_bh_start, expected_default_bh_end, expected_default_biz_days, tz_str,
+        max_slots=2, max_days_ahead=14 # Check max_slots logic (3 - 1 found)
+    )
+
 
 # --- Conflict Detection Edge Cases ---
 

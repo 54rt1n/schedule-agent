@@ -36,7 +36,9 @@ except ImportError:
 
 from scheduling_agent.task_manager import SchedulingTaskManager
 from scheduling_agent.db.service import DatabaseService
-from scheduling_agent.db.models import Event, EventCreate
+# Import DB model from .models and DTO schema from .schemas
+from scheduling_agent.db.models import Event
+from scheduling_agent.db.schemas import EventCreate
 from scheduling_agent.core.exceptions import ConflictError # Import potential exceptions
 from scheduling_agent.core.conflict_resolver import ConflictResolver # Import for mocking
 from scheduling_agent.core.nlp_processor import NLPProcessor # Import NLPProcessor

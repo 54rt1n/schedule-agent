@@ -14,7 +14,9 @@ from sqlmodel import SQLModel, select # Keep SQLModel import
 # from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.asyncio import AsyncSession # Keep for type hints
 
-from scheduling_agent.db.models import Event, EventCreate, Participant, EventUpdate, ExcludedDate, ModifiedInstance
+from scheduling_agent.db.models import Event, Participant, ExcludedDate, ModifiedInstance
+# Import DTO schemas from .schemas
+from scheduling_agent.db.schemas import EventCreate, EventUpdate
 from scheduling_agent.db.service import DatabaseService
 from scheduling_agent.core.exceptions import ConflictError
 # Remove patching related imports
@@ -470,7 +472,8 @@ async def test_update_event(db_service: DatabaseService, test_session: AsyncSess
 
     # Prepare update data (using a placeholder Update model for now)
     # Need to define EventUpdate model later
-    from scheduling_agent.db.models import EventUpdate # Assuming this exists
+    # Import from the correct location: db.schemas
+    from scheduling_agent.db.schemas import EventUpdate
     update_data = EventUpdate(
         title="Updated Event Title",
         location="Room 2",
@@ -538,6 +541,60 @@ async def test_delete_event_not_found(db_service: DatabaseService):
 
     # --- Assert ---
     assert deleted is False
+
+@pytest.mark.asyncio
+async def test_update_event_not_found(db_service: DatabaseService):
+    """Test updating a non-existent event returns None."""
+    # --- Arrange ---
+    non_existent_id = uuid.uuid4()
+    update_data = EventUpdate(title="This Should Not Update")
+
+    # --- Act ---
+    updated_event = await db_service.update_event(event_id=non_existent_id, update_data=update_data)
+
+    # --- Assert ---
+    assert updated_event is None
+
+@pytest.mark.asyncio
+async def test_get_events_in_range_empty(db_service: DatabaseService):
+    """Test get_events_in_range returns empty list when no events are in range."""
+    # --- Arrange ---
+    # No events created
+    range_start_aware = datetime(2024, 11, 1, 0, 0, 0, tzinfo=timezone.utc)
+    range_end_aware = datetime(2024, 11, 10, 0, 0, 0, tzinfo=timezone.utc)
+
+    # --- Act ---
+    retrieved_events = await db_service.get_events_in_range(start=range_start_aware, end=range_end_aware)
+
+    # --- Assert ---
+    assert retrieved_events == []
+
+@pytest.mark.asyncio
+async def test_get_events_in_range_recurring_outside_range(db_service: DatabaseService):
+    """Test get_events_in_range returns empty list when recurring instances fall outside range."""
+    # --- Arrange ---
+    # Base event: Weekly on Mon at 9am UTC for 2 weeks, starting 2024-12-02
+    base_start_naive = datetime(2024, 12, 2, 9, 0, 0)
+    base_end_naive = datetime(2024, 12, 2, 10, 0, 0)
+    rrule_str = "FREQ=WEEKLY;BYDAY=MO;COUNT=2" # Instances: Dec 2nd, Dec 9th
+    base_event_data = EventCreate(
+        title="Recurring Outside",
+        start_time=base_start_naive,
+        end_time=base_end_naive,
+        time_zone="UTC",
+        rrule=rrule_str
+    )
+    await db_service.create_event(event_data=base_event_data)
+
+    # Define a query range that does NOT overlap with the instances
+    range_start_aware = datetime(2024, 12, 10, 0, 0, 0, tzinfo=timezone.utc) # After last instance
+    range_end_aware = datetime(2024, 12, 15, 0, 0, 0, tzinfo=timezone.utc)
+
+    # --- Act ---
+    retrieved_events = await db_service.get_events_in_range(start=range_start_aware, end=range_end_aware)
+
+    # --- Assert ---
+    assert retrieved_events == []
 
 # TODO: Add tests for:
 # - Creating event WITH participants (needs modification to create_event service method)

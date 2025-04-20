@@ -4,7 +4,9 @@ from typing import List, Dict, Any, Optional, TYPE_CHECKING
 from datetime import datetime, timedelta, timezone, time
 from zoneinfo import ZoneInfo
 
-from scheduling_agent.db.models import Event, EventCreate
+# Import DB models from .models and DTO schemas from .schemas
+from scheduling_agent.db.models import Event
+from scheduling_agent.db.schemas import EventCreate
 # Remove direct import of DatabaseService
 # from scheduling_agent.db.service import DatabaseService
 from scheduling_agent.core.date_utils import DateUtils

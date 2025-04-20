@@ -8,7 +8,10 @@ from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .database import get_async_session
-from .models import Event, Participant, EventCreate, ExcludedDate, ModifiedInstance, EventUpdate
+# Import DB models from .models
+from .models import Event, Participant, ExcludedDate, ModifiedInstance
+# Import DTO schemas from .schemas
+from .schemas import EventCreate, EventUpdate
 from scheduling_agent.core.date_utils import DateUtils
 from scheduling_agent.logging_config import get_logger
 from scheduling_agent.core.conflict_resolver import ConflictResolver

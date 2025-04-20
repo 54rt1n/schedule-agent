@@ -34,24 +34,24 @@ class LLMSchedulingParseResult(BaseModel):
     original_query: Optional[str] = None # Added by NLPProcessor later
 
 # --- Schemas for Database Models (Example - can be expanded) ---
-# These might live in db/models.py or db/schemas.py eventually
-
-class EventBase(BaseModel):
-    title: str
-    start_time: str # ISO 8601 UTC
-    end_time: str   # ISO 8601 UTC
-    time_zone: str  # IANA Timezone
-    location: Optional[str] = None
-    notes: Optional[str] = None
-    rrule: Optional[str] = None
-
-class EventCreate(EventBase):
-    participants: Optional[List[str]] = Field(default_factory=list)
-
-class EventRead(EventBase):
-    id: str = Field(default_factory=str)
-    participants: List[str] = Field(default_factory=list)
-    created_at: str = Field(default_factory=str)
-    updated_at: str = Field(default_factory=str)
-
-    model_config = ConfigDict(from_attributes=True)
+# These are redundant and have been removed.
+# Authoritative definitions are in db/models.py and db/schemas.py.
+# class EventBase(BaseModel):
+#     title: str
+#     start_time: str # ISO 8601 UTC
+#     end_time: str   # ISO 8601 UTC
+#     time_zone: str  # IANA Timezone
+#     location: Optional[str] = None
+#     notes: Optional[str] = None
+#     rrule: Optional[str] = None
+#
+# class EventCreate(EventBase):
+#     participants: Optional[List[str]] = Field(default_factory=list)
+#
+# class EventRead(EventBase):
+#     id: str = Field(default_factory=str)
+#     participants: List[str] = Field(default_factory=list)
+#     created_at: str = Field(default_factory=str)
+#     updated_at: str = Field(default_factory=str)
+#
+#     model_config = ConfigDict(from_attributes=True)

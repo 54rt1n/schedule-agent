@@ -6,28 +6,18 @@ from typing import Any, Dict, List, Union, Optional
 from datetime import datetime, timedelta, timezone
 from pydantic import ValidationError
 
-# Attempt to import openai, but don't make it a hard requirement
-try:
-    import openai
-    OPENAI_AVAILABLE = True
-except ImportError:
-    openai = None # type: ignore
-    OPENAI_AVAILABLE = False
-
-# Attempt to import dateparser for fallback
-try:
-    import dateparser
-    DATEPARSER_AVAILABLE = True
-except ImportError:
-    dateparser = None # type: ignore
-    DATEPARSER_AVAILABLE = False
+# Required imports
+import openai
+import dateparser
 
 from scheduling_agent.logging_config import get_logger
-from scheduling_agent.core.schemas import ( # Import the Pydantic models
+from scheduling_agent.core.schemas import (
     LLMSchedulingParseResult,
     LLMDateInfo,
     LLMFilters,
 )
+# Import settings
+from scheduling_agent.settings import settings
 
 logger = get_logger(__name__)
 
@@ -47,44 +37,53 @@ class LLMProvider:
     ):
         """
         Initialize the LLM provider.
+        Reads config primarily from settings, allows overrides via init.
 
         Args:
-            api_key: API key for the LLM service (defaults to env LLM_API_KEY).
-            base_url: Base URL for API requests (defaults to env LLM_BASE_URL or OpenAI).
-            model: Model name to use (defaults to env LLM_MODEL or gpt-3.5-turbo).
+            api_key: API key override.
+            base_url: Base URL override.
+            model: Model name override.
         """
-        self.api_key = api_key or os.getenv("LLM_API_KEY")
-        self.base_url = base_url or os.getenv("LLM_BASE_URL", "https://api.openai.com/v1")
-        self.model = model or os.getenv("LLM_MODEL", "gpt-3.5-turbo")
-        self.client: Optional[openai.AsyncClient] = None
+        # Prioritize init args, then settings, then None/defaults
+        self.api_key = api_key if api_key is not None else settings.llm_api_key
+        self.base_url = base_url if base_url is not None else settings.llm_base_url
+        self.model = model if model is not None else settings.llm_model
 
-        if OPENAI_AVAILABLE:
-            if not self.api_key and "openai.com" in self.base_url:
-                 logger.warning("OpenAI API key not provided via init or LLM_API_KEY env var.")
-            
-            try:
-                 self.client = openai.AsyncClient(
-                    api_key=self.api_key, base_url=self.base_url
-                )
-                 logger.info(f"OpenAI client initialized for model {self.model} at {self.base_url}")
-            except Exception as e:
-                 logger.error(f"Failed to initialize OpenAI client: {e}", exc_info=True)
-                 self.client = None # Ensure client is None if init fails
-        else:
-            logger.warning("openai package not installed. LLM functionality will be disabled. Run `pip install openai`")
+        # Use a default base_url if none is provided via init or settings
+        if not self.base_url:
+            self.base_url = "https://api.openai.com/v1"
+            logger.info("No LLM base URL provided, defaulting to OpenAI API.")
 
-        if not DATEPARSER_AVAILABLE:
-             logger.warning("dateparser package not installed. Fallback date parsing will be unavailable. Run `pip install dateparser`")
+        # Default model if not set
+        if not self.model:
+            # Sensible default from settings is usually used, but have a fallback
+            self.model = "gpt-3.5-turbo"
+            logger.info("No LLM model specified, defaulting to gpt-3.5-turbo.")
+
+        # Only warn about missing API key if using the default OpenAI URL
+        if not self.api_key and "openai.com" in self.base_url:
+            logger.warning("OpenAI API key not provided via init or settings.llm_api_key env var.")
+
+        try:
+            self.client = openai.AsyncClient(
+                api_key=self.api_key,
+                base_url=self.base_url
+            )
+            logger.info(f"OpenAI client initialized for model {self.model} at {self.base_url}")
+        except Exception as e:
+            logger.error(f"Failed to initialize required OpenAI client: {e}", exc_info=True)
+            raise RuntimeError(f"Failed to initialize required OpenAI client: {e}") from e
 
 
     async def parse_scheduling_query(self, query: str) -> LLMSchedulingParseResult:
         """Parse a full natural language query using LLM and Pydantic validation."""
         logger.debug("Parsing full scheduling query", query=query)
-        system_prompt = """
+        # Note: Prompt includes dynamic current_date and the user_query
+        system_prompt = f"""
         You are an intelligent scheduling assistant. Your task is to parse a user's natural language query related to calendar events and extract structured information.
-        The current date is {current_date}.
+        The current date is {datetime.now(timezone.utc).date().isoformat()}.
 
-        Analyze the query: "{user_query}"
+        Analyze the query: "{query}"
 
         Determine the user's primary **intent**. Choose ONE from:
         - create_event: User wants to add a new event.
@@ -106,11 +105,13 @@ class LLMProvider:
         - time_description: Natural language description of the time (e.g., "this week", "tomorrow afternoon").
         - is_recurring: Boolean (true/false) if the event should repeat.
         - recurrence_rule: iCalendar RRULE string if recurring (e.g., 'FREQ=WEEKLY;BYDAY=MO').
+        - timeZone: IANA timezone name, if provided or strongly implied.
 
         Extract **filters** mentioned in the query:
         - title: The title or subject of the event (string).
         - location: The location of the event (string).
         - participants: A list of participant names or emails (list[string]).
+        - format: The requested export format (e.g., "ics", "org").
 
         Respond ONLY with a valid JSON object containing the following keys:
         - "intent": The determined intent (string).
@@ -123,8 +124,8 @@ class LLMProvider:
         {{
           "intent": "create_event",
           "date_info": {{
-            "start_date": "YYYY-MM-DD", // Tomorrow's date
-            "end_date": "YYYY-MM-DD", // Tomorrow's date
+            "start_date": "{datetime.now(timezone.utc).date().isoformat()}", // Example: Today's date if "tomorrow" relative base is today
+            "end_date": "{datetime.now(timezone.utc).date().isoformat()}", // Example: Same date
             "specific_time": "15:00:00",
             "time_description": "tomorrow at 3pm"
           }},
@@ -138,10 +139,7 @@ class LLMProvider:
 
         If crucial information like date/time for creation is missing, reflect that in the output (e.g., missing date_info fields) but still determine the likely intent.
         If the query is ambiguous or lacks scheduling details, set intent to 'unknown' and confidence lower.
-        """.format(
-            current_date=datetime.now(timezone.utc).date().isoformat(),
-            user_query=query
-        )
+        """ # No .format() needed, using f-string directly
 
         # Attempt to get raw JSON dict from LLM
         raw_llm_result = await self._generate_json(system_prompt, query)
@@ -150,13 +148,8 @@ class LLMProvider:
         if isinstance(raw_llm_result, dict):
             try:
                 # Attempt to validate the raw dictionary using the Pydantic model
-                validated_result = LLMSchedulingParseResult(**raw_llm_result)
-                # Ensure nested models are instantiated if they came back as dicts
-                if isinstance(validated_result.date_info, dict):
-                     validated_result.date_info = LLMDateInfo(**validated_result.date_info)
-                if isinstance(validated_result.filters, dict):
-                     validated_result.filters = LLMFilters(**validated_result.filters)
-                
+                validated_result = LLMSchedulingParseResult.model_validate(raw_llm_result)
+                # No need to manually re-instantiate nested models if model_validate works correctly
                 validated_result.method = 'llm' # Mark method as LLM
                 logger.info("Successfully parsed and validated LLM response.", intent=validated_result.intent)
                 return validated_result
@@ -175,10 +168,10 @@ class LLMProvider:
         fallback_date_info_dict = self._get_fallback_date_result(query)
         fallback_method = fallback_date_info_dict.get('method', 'fallback_failure')
         # Create a default LLMSchedulingParseResult for fallback
-        # Populate date_info using the fallback dictionary
         fallback_result = LLMSchedulingParseResult(
             intent="unknown",
-            date_info=LLMDateInfo(**fallback_date_info_dict) if fallback_date_info_dict else LLMDateInfo(),
+            # Populate date_info using the fallback dictionary, ensure it's a DateInfo model
+            date_info=LLMDateInfo.model_validate(fallback_date_info_dict) if fallback_date_info_dict else LLMDateInfo(),
             filters=LLMFilters(), # Default empty filters
             confidence=0.2, # Hardcoded low confidence for fallback
             method=fallback_method
@@ -192,12 +185,7 @@ class LLMProvider:
         Returns None if any error occurs.
         """
         logger.debug("Generating JSON from LLM", model=self.model)
-        if not self.client:
-            logger.error("LLM client not available for _generate_json call.")
-            # Depending on the caller, they might handle fallback
-            # Return empty dict as a signal of failure here.
-            return None # Signal failure
-
+        # Assumes self.client was successfully initialized in __init__
         try:
             response = await self.client.chat.completions.create(
                 model=self.model,
@@ -209,19 +197,19 @@ class LLMProvider:
                 response_format={"type": "json_object"} # Request JSON output
             )
 
-            # Add checks for None before accessing attributes
             if not response.choices or not response.choices[0].message:
                 logger.warning("LLM response structure missing expected parts (choices or message).")
                 return None
 
             content = response.choices[0].message.content
-            if content is None: # Explicit check for None content
+            if content is None:
                 logger.warning("Received None content from LLM.")
                 return None
 
             try:
                 parsed_json = json.loads(content)
                 logger.debug("Successfully parsed JSON from LLM.")
+                # Add method marker if it's a dictionary and missing
                 if isinstance(parsed_json, dict) and 'method' not in parsed_json:
                     parsed_json['method'] = 'llm'
                 return parsed_json
@@ -236,6 +224,9 @@ class LLMProvider:
             logger.error(f"LLM API rate limit exceeded: {e}")
             # Consider adding retry logic here with backoff
             return None
+        except openai.AuthenticationError as e: # Catch specific auth error
+            logger.error(f"LLM API authentication error: {e}")
+            return None
         except openai.APIStatusError as e:
             logger.error(f"LLM API status error: {e.status_code}", response=e.response)
             return None
@@ -246,18 +237,15 @@ class LLMProvider:
     def _get_fallback_date_result(self, query: str) -> Dict[str, Any]:
         """Fallback date parsing using dateparser when LLM fails or is unavailable."""
         logger.warning("Falling back to dateparser for query", query=query)
-        if not DATEPARSER_AVAILABLE:
-            logger.error("dateparser not available for fallback.")
-            return {}
-
         try:
             # Settings to prefer future dates and use current time as reference
-            settings = {
+            parser_settings = {
                 'PREFER_DATES_FROM': 'future',
                 'RELATIVE_BASE': datetime.now(timezone.utc)
                 # Consider adding TIMEZONE setting if user timezone is known
+                # 'TIMEZONE': 'Your/Timezone' # Example
             }
-            parsed_date = dateparser.parse(query, settings=settings)
+            parsed_date = dateparser.parse(query, settings=parser_settings)
 
             if parsed_date:
                 # Ensure the result is timezone-aware (UTC)
@@ -266,8 +254,6 @@ class LLMProvider:
                 else:
                     parsed_date = parsed_date.astimezone(timezone.utc)
 
-                # Simple fallback: return start/end as the same parsed date
-                # More sophisticated logic could try to detect ranges based on keywords
                 date_iso = parsed_date.date().isoformat()
                 return {
                     "start_date": date_iso,

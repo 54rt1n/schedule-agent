@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field, HttpUrl
 from typing import List, Optional, Dict, Any
-import os # Import os for environment variables
+# Import settings
+from scheduling_agent.settings import settings
 
 
 class AgentSkill(BaseModel):
@@ -43,19 +44,21 @@ class AgentCard(BaseModel):
 def get_agent_card() -> AgentCard:
     """Constructs and returns the configured AgentCard instance.
 
-    Reads configuration from environment variables.
+    Reads configuration from settings.
     """
-    # Load configuration from environment variables with defaults
-    agent_host = os.getenv("AGENT_HOST", "localhost")
-    agent_port = int(os.getenv("AGENT_PORT", "8000"))
-    agent_version = os.getenv("AGENT_VERSION", "0.1.0") # Or read from pyproject.toml?
+    # Load configuration from settings object
+    # agent_host = os.getenv("AGENT_HOST", "localhost") # Replaced by settings
+    # agent_port = int(os.getenv("AGENT_PORT", "8000")) # Replaced by settings
+    # agent_version = os.getenv("AGENT_VERSION", "0.1.0") # Replaced by settings
 
-    # Construct the AgentCard dynamically
+    # Construct the AgentCard dynamically using settings
     agent_card_instance = AgentCard(
         name="Scheduling Agent",
         description="Calendar management service for creating, querying, and exporting events using LLMs and conflict resolution.",
-        url=f"http://{agent_host}:{agent_port}/", # Use loaded config
-        version=agent_version, # Use loaded config
+        # Use settings for host and port
+        url=f"http://{settings.server_host}:{settings.server_port}/",
+        # Use settings for version
+        version=settings.agent_version,
         capabilities=AgentCapabilities(
             streaming=False, # Not implemented yet
             pushNotifications=False, # Not implemented yet

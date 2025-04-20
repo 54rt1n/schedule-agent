@@ -1,4 +1,3 @@
-from functools import lru_cache
 from unittest.mock import MagicMock, AsyncMock
 from fastapi import Request # Import Request for dependency
 from scheduling_agent.task_manager import SchedulingTaskManager
@@ -15,38 +14,58 @@ from scheduling_agent.common.types import Task, TaskStatus, TaskState, TaskSendP
 import uuid
 from typing import Optional, Dict
 
+from scheduling_agent.logging_config import get_logger # Import logger
+
+logger = get_logger(__name__) # Initialize logger for this module
+
 # TODO: Implement proper singleton/factory logic, potentially using app state or lifespan context.
 
 # Placeholder instances - these should be managed properly (e.g., singletons)
 # Ensure DatabaseService is initialized correctly, possibly using settings
-@lru_cache()
-def get_db_service() -> DatabaseService:
-    # TODO: Get DB URL from settings/environment
-    return DatabaseService("schedule_agent.db")
+def get_db_service(request: Request) -> DatabaseService:
+    db_service = getattr(request.app.state, "db_service", None)
+    if db_service is None:
+        logger.error("DatabaseService not found in app state!")
+        raise RuntimeError("DatabaseService not initialized.")
+    return db_service
 
-@lru_cache()
-def get_date_utils() -> DateUtils:
-    return DateUtils()
+def get_date_utils(request: Request) -> DateUtils:
+    date_utils = getattr(request.app.state, "date_utils", None)
+    if date_utils is None:
+        logger.error("DateUtils not found in app state!")
+        raise RuntimeError("DateUtils not initialized.")
+    return date_utils
 
-@lru_cache()
-def get_llm_provider() -> LLMProvider:
-    # TODO: Configure from settings/environment
-    return LLMProvider()
+def get_llm_provider(request: Request) -> LLMProvider:
+    llm_provider = getattr(request.app.state, "llm_provider", None)
+    if llm_provider is None:
+        logger.error("LLMProvider not found in app state!")
+        raise RuntimeError("LLMProvider not initialized.")
+    return llm_provider
 
-@lru_cache()
-def get_nlp_processor() -> NLPProcessor:
-    return NLPProcessor(date_utils=get_date_utils(), llm_provider=get_llm_provider())
+def get_nlp_processor(request: Request) -> NLPProcessor:
+    nlp_processor = getattr(request.app.state, "nlp_processor", None)
+    if nlp_processor is None:
+        logger.error("NLPProcessor not found in app state!")
+        raise RuntimeError("NLPProcessor not initialized.")
+    return nlp_processor
 
-@lru_cache()
-def get_conflict_resolver() -> ConflictResolver:
-    return ConflictResolver(db_service=get_db_service(), date_utils=get_date_utils())
+def get_conflict_resolver(request: Request) -> ConflictResolver:
+    conflict_resolver = getattr(request.app.state, "conflict_resolver", None)
+    if conflict_resolver is None:
+        logger.error("ConflictResolver not found in app state!")
+        raise RuntimeError("ConflictResolver not initialized.")
+    return conflict_resolver
 
 # Exporters (Phase 4, Task 2)
-@lru_cache()
-def get_exporters() -> Dict[str, CalendarExporter]:
+def get_exporters(request: Request) -> Dict[str, CalendarExporter]:
     """Dependency function to get the available exporters."""
-    date_utils = get_date_utils() # Reuse date utils
+    date_utils = get_date_utils(request) # Reuse date utils
     # TODO: Eventually configure which exporters are active via settings
+    exporters = getattr(request.app.state, "exporters", None)
+    if exporters is None:
+        logger.error("Exporters dictionary not found in app state!")
+        raise RuntimeError("Exporters not initialized.")
     return {
         "ics": ICalExporter(date_utils=date_utils),
         "org": OrgModeExporter(date_utils=date_utils)
@@ -57,12 +76,10 @@ def get_exporters() -> Dict[str, CalendarExporter]:
 # @lru_cache()
 def get_task_manager(request: Request) -> SchedulingTaskManager:
     """Dependency function to get the TaskManager instance from app state."""
-    # Retrieve the singleton instance created during lifespan startup
     task_manager = getattr(request.app.state, "task_manager", None)
     if task_manager is None:
-        # This should ideally not happen if lifespan context runs correctly
-        print("ERROR: TaskManager instance not found in app state!") # Use logger instead
-        raise RuntimeError("TaskManager not initialized. Check application lifespan.")
+        logger.error("TaskManager not found in app state!")
+        raise RuntimeError("TaskManager not initialized.")
     return task_manager
 
     # --- REMOVED MOCK IMPLEMENTATION ---
