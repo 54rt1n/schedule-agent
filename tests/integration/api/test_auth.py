@@ -5,13 +5,13 @@ import httpx
 import pytest
 
 # Import AgentCard and get_agent_card for validation
-from scheduling_agent.agent_card import AgentCard, get_agent_card
+from scheduling_agent.a2a.agent_card import AgentCard, get_agent_card
 
 # Import middleware module to patch its settings
 from scheduling_agent.api.middleware import auth as auth_middleware
 
 # Import necessary types
-from scheduling_agent.common.types import JSONRPCRequest
+from scheduling_agent.a2a.types import JSONRPCRequest
 
 # Import fixtures from conftest
 from .conftest import RPC_URL  # Import BASE_URL for well-known
@@ -84,7 +84,7 @@ async def test_rpc_endpoint_valid_bearer_token(
 
     # Mock TaskManager to return TaskNotFound error for this specific call
     # Ensure the mock is configured *before* the client call
-    from scheduling_agent.common.types import TaskNotFoundError
+    from scheduling_agent.a2a.types import TaskNotFoundError
 
     mock_task_manager.get_task.side_effect = TaskNotFoundError(
         f"Task with ID '{task_id}' not found."

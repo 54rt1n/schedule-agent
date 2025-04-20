@@ -18,7 +18,7 @@ from scheduling_agent.api.dependencies import (
     get_nlp_processor,
     get_task_manager,
 )  # Added get_exporters and get_date_utils
-from scheduling_agent.common.types import (
+from scheduling_agent.a2a.types import (
     Artifact,
     CancelTaskParams,  # Add CancelTaskParams
     EventQuery,
@@ -55,7 +55,7 @@ from scheduling_agent.db.schemas import EventCreate
 # Import db models/services for logic
 from scheduling_agent.db.service import DatabaseService
 from scheduling_agent.logging_config import get_logger
-from scheduling_agent.task_manager import SchedulingTaskManager
+from scheduling_agent.a2a.task_manager import SchedulingTaskManager
 
 logger = get_logger(__name__)
 router = APIRouter()

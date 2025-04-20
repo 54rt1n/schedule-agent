@@ -20,7 +20,7 @@ from scheduling_agent.db.service import DatabaseService
 from scheduling_agent.logging_config import get_logger
 
 # Import the canonical A2A types
-from .common.types import (
+from .types import (
     Artifact,
     Message,
     Part,  # Might need FileContent too if used directly

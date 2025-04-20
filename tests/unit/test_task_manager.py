@@ -6,7 +6,7 @@ import pytest
 # Keep necessary fixtures for TaskManager instantiation, even if not used by tests
 from sqlalchemy.orm import sessionmaker
 
-from scheduling_agent.common.types import (
+from scheduling_agent.a2a.types import (
     TaskNotFoundError,
     TaskSendParams,
 )  # For create_task and error check
@@ -19,7 +19,7 @@ from scheduling_agent.core.nlp_processor import NLPProcessor
 from scheduling_agent.db.service import DatabaseService
 
 # Models and Enums to use (assuming they are defined or imported in TaskManager)
-from scheduling_agent.task_manager import (
+from scheduling_agent.a2a.task_manager import (
     Artifact,
     Message,
     Part,

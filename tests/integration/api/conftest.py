@@ -20,7 +20,7 @@ from scheduling_agent.api.dependencies import (
 from scheduling_agent.api.main import app as main_app
 
 # Import middleware module to patch its settings
-from scheduling_agent.common.types import Task, TaskState, TaskStatus
+from scheduling_agent.a2a.types import Task, TaskState, TaskStatus
 from scheduling_agent.core.conflict_resolver import ConflictResolver
 from scheduling_agent.core.date_utils import DateUtils
 from scheduling_agent.core.exporters.base import CalendarExporter
@@ -32,7 +32,7 @@ from scheduling_agent.db.service import DatabaseService
 
 # Import settings to patch
 from scheduling_agent.settings import settings
-from scheduling_agent.task_manager import SchedulingTaskManager
+from scheduling_agent.a2a.task_manager import SchedulingTaskManager
 
 # Import test_db_url fixture from root conftest
 

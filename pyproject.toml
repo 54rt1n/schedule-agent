@@ -56,6 +56,8 @@ schedule-agent = "scheduling_agent.__main__:main" # Example entry point
 [tool.ruff]
 target-version = "py312"
 line-length = 100
+
+[tool.ruff.lint]
 select = [
     "E",  # pycodestyle errors
     "W",  # pycodestyle warnings
@@ -99,16 +101,29 @@ ignore = [
     "C901", # Complex function (sometimes necessary)
     "PLR2004", # Magic value used in comparison (common in configs/constants)
     "PLR0913", # Too many arguments (FastAPI dependencies)
+    "TRY003", # Allow long exception messages
+    "RET504", # Allow unnecessary variable assignment before return
+    "G004", # Allow f-string literals in logging calls
+    "RUF005", # Allow unnecessary list/dict/tuple concatenations
+    "EM102", # Allow f-string literals in exception messages
+    "PLR0911", # Allow many return statements (stylistic)
+    "TRY300", # Allow statements in try block that could be in else (stylistic)
+    "PLR0915", # Allow many statements in function (stylistic)
+    "TRY301", # Allow raise without abstracting to function (stylistic)
+    "RSE102", # Allow unnecessary parentheses on raised exceptions (stylistic)
+    "EM101", # Allow string literals in exceptions (stylistic, similar to EM102)
 ]
+
+# Add per-file ignores here
+[tool.ruff.lint.per-file-ignores]
+"tests/unit/*.py" = ["SLF001", "DTZ001", "ARG001", "ARG002", "F841"]
+"tests/integration/api/*.py" = ["ARG001"]
 
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
 skip-magic-trailing-comma = false
 line-ending = "lf"
-
-[tool.ruff.lint.isort]
-known-first-party = ["scheduling_agent"]
 
 [tool.mypy]
 python_version = "3.12"

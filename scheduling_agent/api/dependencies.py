@@ -11,7 +11,7 @@ from scheduling_agent.core.llm_provider import LLMProvider
 from scheduling_agent.core.nlp_processor import NLPProcessor
 from scheduling_agent.db.service import DatabaseService
 from scheduling_agent.logging_config import get_logger  # Import logger
-from scheduling_agent.task_manager import SchedulingTaskManager
+from scheduling_agent.a2a.task_manager import SchedulingTaskManager
 
 logger = get_logger(__name__)  # Initialize logger for this module
 

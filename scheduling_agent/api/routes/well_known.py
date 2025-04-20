@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from scheduling_agent.agent_card import AgentCard, get_agent_card
+from scheduling_agent.a2a.agent_card import AgentCard, get_agent_card
 
 router = APIRouter()
 

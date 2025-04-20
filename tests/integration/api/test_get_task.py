@@ -5,7 +5,7 @@ import httpx
 import pytest
 
 # Import necessary types
-from scheduling_agent.common.types import (
+from scheduling_agent.a2a.types import (
     JSONRPCRequest,
     Message,
     Part,

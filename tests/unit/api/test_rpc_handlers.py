@@ -13,10 +13,10 @@ from scheduling_agent.api.routes.rpc import (
 )  # Keep base imports
 
 # Import error types needed for parametrization
-from scheduling_agent.common import types as jsonrpc_errors
+from scheduling_agent.a2a import types as jsonrpc_errors
 
 # Import types
-from scheduling_agent.common.types import (
+from scheduling_agent.a2a.types import (
     Artifact,
     CancelTaskParams,
     FileContent,
@@ -54,7 +54,7 @@ from scheduling_agent.core.schemas import (
 from scheduling_agent.db.models import Event
 from scheduling_agent.db.schemas import EventCreate
 from scheduling_agent.db.service import DatabaseService
-from scheduling_agent.task_manager import SchedulingTaskManager
+from scheduling_agent.a2a.task_manager import SchedulingTaskManager
 
 # --- Mocks and Fixtures ---
 

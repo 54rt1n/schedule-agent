@@ -6,16 +6,16 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError  # Import for handling 422
 from fastapi.responses import JSONResponse
 
-from scheduling_agent.api.middleware.auth import APIKeyAuthMiddleware
-from scheduling_agent.api.routes import rpc, well_known
-from scheduling_agent.common.types import (
+from scheduling_agent.a2a.types import (
     InternalError,
     InvalidRequestError,
     ParseError,
 )
-from scheduling_agent.common.types import (
+from scheduling_agent.a2a.types import (
     JSONRPCResponse as A2AJSONRPCResponse,  # Avoid naming conflict with fastapi.responses.JSONResponse
 )
+from scheduling_agent.api.middleware.auth import APIKeyAuthMiddleware
+from scheduling_agent.api.routes import rpc, well_known
 from scheduling_agent.core.conflict_resolver import ConflictResolver
 from scheduling_agent.core.date_utils import DateUtils
 from scheduling_agent.core.exceptions import NLPError
@@ -34,7 +34,7 @@ from scheduling_agent.logging_config import get_logger, setup_logging
 from scheduling_agent.settings import settings
 
 # Import components needed for lifespan initialization
-from scheduling_agent.task_manager import SchedulingTaskManager
+from scheduling_agent.a2a.task_manager import SchedulingTaskManager
 
 
 # --- Helper Function for Error Handling ---

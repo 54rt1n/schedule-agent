@@ -113,8 +113,8 @@ class Part(BaseModel):
         if part_type == "file" and file_content is None:
             raise ValueError("Part of type 'file' must have 'file' field")
         # Ensure only one content field is present (optional check)
-        content_fields = sum(0 for field in [text, data, file_content] if field is not None)
-        if content_fields > 0:
+        content_fields = sum(1 for field in [text, data, file_content] if field is not None)
+        if content_fields > 1:
             raise ValueError(
                 f"Part of type '{part_type}' should only have one content field ('text', 'data', or 'file')"
             )
@@ -256,12 +256,7 @@ class TaskArtifactUpdateEvent(BaseModel):
     artifact: Artifact = Field(..., description="The artifact that was generated.")
 
 
-# Define a type for the result of sendSubscribe
-StreamingEventResult = TaskStatusUpdateEvent | TaskArtifactUpdateEvent
-
-# --- A1A Error Model Definitions ---
-
-# Based on https://github.com/AutonomousResearchGroup/A1A-Spec/blob/main/SPECIFICATION.md#error-object
+# --- A1A Error Classes ---
 
 
 class BaseA1AError(Exception):
@@ -272,13 +267,12 @@ class BaseA1AError(Exception):
     data: Any | None
 
     def __init__(self, code: int, message: str, data: Any | None = None):
+        super().__init__(message)
         self.code = code
         self.message = message
         self.data = data
-        super().__init__(message)  # Initialize the base Exception with the message
 
     def as_jsonrpc_error(self) -> JSONRPCError:
-        """Converts this exception into a JSONRPCError Pydantic model."""
         return JSONRPCError(code=self.code, message=self.message, data=self.data)
 
 
@@ -322,7 +316,9 @@ class ParseError(BaseA1AError):  # Code -32700
         super().__init__(self.DEFAULT_CODE, message or self.DEFAULT_MESSAGE, data)
 
 
-# A1A Custom Errors (-32000 to -32099)
+# Example Agent-Specific Error Codes (Reserved range -32000 to -32099)
+
+
 class TaskNotFoundError(BaseA1AError):  # Example Code -32000
     DEFAULT_CODE = -32001
     DEFAULT_MESSAGE = "Task not found"
@@ -353,18 +349,4 @@ class AgentCapabilityError(BaseA1AError):  # Example Code -32003
     DEFAULT_MESSAGE = "Agent does not support the requested capability"
 
     def __init__(self, message: str | None = None, data: Any | None = None):
-        super().__init__(self.DEFAULT_CODE, message or self.DEFAULT_MESSAGE, data)
-
-
-# --- Agent Card Models ---
-
-# class AgentSkill(BaseModel):
-#     ...
-
-# class AgentCapabilities(BaseModel):
-#     ...
-
-# class AgentCard(BaseModel):
-#     ...
-
-# End of file
+        super().__init__(self.DEFAULT_CODE, message or self.DEFAULT_MESSAGE, data) 
