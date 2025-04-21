@@ -7,12 +7,15 @@ from sqlmodel import select
 from scheduling_agent.core.conflict_resolver import ConflictResolver
 from scheduling_agent.core.date_utils import DateUtils
 from scheduling_agent.core.exceptions import ConflictError
+from scheduling_agent.core.exceptions import TaskNotFoundError
 from scheduling_agent.logging_config import get_logger
 
 from .database import get_async_session
 
 # Import DB models from .models
-from .models import Event, Participant
+from .models import Event, Participant, A2ATask
+# Import A2A types
+from scheduling_agent.a2a import types as a2a_types
 
 # Import DTO schemas from .schemas
 from .schemas import EventCreate, EventUpdate
@@ -263,6 +266,166 @@ class DatabaseService:
             await session.delete(db_event)
             await session.commit()
             return True
+
+    # --- A2A Task Persistence Methods ---
+
+    async def save_a2a_task(self, task: a2a_types.Task) -> None:
+        """Saves (upserts) the state of an A2A Task to the database."""
+        async with get_async_session(self.session_factory) as session:
+            try:
+                # Convert the A2A Task object to the DB model representation
+                db_task_record = A2ATask(
+                    id=task.id,
+                    session_id=task.sessionId,
+                    state=task.status.state.value, # Store the enum value
+                    # Serialize Pydantic models/lists to JSON strings
+                    status_message_json=task.status.message.model_dump_json(exclude_none=True)
+                    if task.status and task.status.message
+                    else None,
+                    params_json=task.params.model_dump_json(exclude_none=True)
+                    if task.params
+                    else None,
+                    # Fix: Explicitly check for empty list before serializing
+                    artifacts_json=a2a_types.ArtifactsList(root=task.artifacts).model_dump_json() 
+                    if task.artifacts 
+                    else None, # Store None if list is empty or None
+                    history_json=a2a_types.HistoryList(root=task.history).model_dump_json() 
+                    if task.history 
+                    else None, # Store None if list is empty or None
+                    # created_at and updated_at are handled by the model defaults/onupdate
+                )
+
+                # Use merge for upsert behavior (insert or update)
+                await session.merge(db_task_record)
+                await session.commit()
+                logger.debug("Saved A2A Task state to DB", task_id=task.id)
+            except Exception as e:
+                logger.exception(
+                    "Database error occurred while saving A2A task",
+                    task_id=task.id,
+                    error=str(e),
+                )
+                # Rollback is handled by the async context manager
+                raise # Re-raise the exception for upstream handling
+
+    async def get_a2a_task_by_id(self, task_id: str) -> a2a_types.Task | None:
+        """Retrieves an A2A Task by its ID, deserializing JSON fields."""
+        async with get_async_session(self.session_factory) as session:
+            # Fetch the raw DB record
+            db_record = await session.get(A2ATask, task_id)
+
+            if not db_record:
+                return None
+
+            # Deserialize JSON fields back into Pydantic models
+            try:
+                task_params = (
+                    a2a_types.TaskSendParams.model_validate_json(db_record.params_json)
+                    if db_record.params_json
+                    else None
+                )
+                status_message = (
+                    a2a_types.Message.model_validate_json(db_record.status_message_json)
+                    if db_record.status_message_json
+                    else None
+                )
+                # Use the helper RootModel types for list deserialization
+                artifacts = (
+                    a2a_types.ArtifactsList.model_validate_json(db_record.artifacts_json).root
+                    if db_record.artifacts_json
+                    else [] # Default to empty list if None/empty in DB
+                )
+                history = (
+                    a2a_types.HistoryList.model_validate_json(db_record.history_json).root
+                    if db_record.history_json
+                    else [] # Default to empty list if None/empty in DB
+                )
+
+                # Reconstruct the TaskStatus
+                task_status = a2a_types.TaskStatus(
+                    state=a2a_types.TaskState(db_record.state), # Convert string back to enum
+                    message=status_message,
+                )
+
+                # Reconstruct the full Task object
+                task = a2a_types.Task(
+                    id=db_record.id,
+                    sessionId=db_record.session_id,
+                    status=task_status,
+                    params=task_params,
+                    artifacts=artifacts,
+                    history=history,
+                    createdAt=db_record.created_at, # Assign timestamps
+                    updatedAt=db_record.updated_at,
+                    # message field in Task is optional, not stored directly in A2ATask model
+                    message=None 
+                )
+                return task
+            except Exception as e:
+                logger.exception(
+                    "Failed to deserialize A2A task data from DB",
+                    task_id=task_id,
+                    error=str(e),
+                )
+                # If deserialization fails, we can't return a valid task
+                return None # Or raise a specific internal error
+
+    async def update_a2a_task_status(self, task_id: str, status: a2a_types.TaskStatus) -> None:
+        """Updates the status of an A2A Task and appends the old status to history."""
+        async with get_async_session(self.session_factory) as session:
+            try:
+                # 1. Fetch the existing record
+                db_record = await session.get(A2ATask, task_id)
+                if not db_record:
+                    raise TaskNotFoundError(task_id=task_id)
+
+                # 2. Reconstruct the *old* status to add to history
+                old_message = (
+                    a2a_types.Message.model_validate_json(db_record.status_message_json)
+                    if db_record.status_message_json
+                    else None
+                )
+                old_status = a2a_types.TaskStatus(
+                    state=a2a_types.TaskState(db_record.state),
+                    message=old_message,
+                )
+
+                # 3. Load current history
+                current_history = (
+                    a2a_types.HistoryList.model_validate_json(db_record.history_json).root
+                    if db_record.history_json
+                    else []
+                )
+
+                # 4. Append the old status to history
+                updated_history = current_history + [old_status]
+
+                # 5. Update the record fields
+                db_record.state = status.state.value
+                db_record.status_message_json = (
+                    status.message.model_dump_json(exclude_none=True)
+                    if status.message
+                    else None
+                )
+                db_record.history_json = a2a_types.HistoryList(root=updated_history).model_dump_json(exclude_none=True)
+                db_record.updated_at = datetime.now(UTC).replace(tzinfo=None) # Explicitly update timestamp
+
+                # 6. Add and commit
+                session.add(db_record) # Add the modified record to the session
+                await session.commit()
+                logger.debug("Updated A2A Task status and history", task_id=task_id, new_state=status.state.value)
+
+            except TaskNotFoundError: # Let TaskNotFound propagate
+                logger.warning("Attempted to update status for non-existent task", task_id=task_id)
+                raise
+            except Exception as e:
+                logger.exception(
+                    "Database error occurred while updating A2A task status",
+                    task_id=task_id,
+                    error=str(e),
+                )
+                # Rollback is handled by the async context manager
+                raise # Re-raise other exceptions
 
     # TODO: Implement other methods:
     # async def find_conflicts(...) -> List[Event]: ...

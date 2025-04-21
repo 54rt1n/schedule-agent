@@ -182,6 +182,18 @@ class Task(BaseModel):
     )  # Note: This is different from our intended 'history'
 
 
+# --- Helper Models for Serialization ---
+# Pydantic v2 allows RootModel for direct validation/serialization of lists
+
+
+class ArtifactsList(BaseModel):
+    root: list[Artifact]
+
+
+class HistoryList(BaseModel):
+    root: list[TaskStatus]
+
+
 # --- Method Parameter Models ---
 
 

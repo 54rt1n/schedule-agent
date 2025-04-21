@@ -26,3 +26,11 @@ class ConflictError(CoreLogicError):
 
 class ExporterError(CoreLogicError):
     """Raised when an error occurs during calendar exporting."""
+
+
+class TaskNotFoundError(CoreLogicError):
+    """Raised when a requested A2A Task cannot be found in the database."""
+    def __init__(self, task_id: str):
+        message = f"Task with ID '{task_id}' not found."
+        super().__init__(message)
+        self.task_id = task_id

@@ -7,16 +7,18 @@ import pytest
 from sqlalchemy.orm import sessionmaker
 
 from scheduling_agent.a2a.types import (
-    TaskNotFoundError,
     TaskSendParams,
 )  # For create_task and error check
+from scheduling_agent.core.exceptions import TaskNotFoundError
 from scheduling_agent.core.conflict_resolver import ConflictResolver
 from scheduling_agent.core.exporters.ical_exporter import ICalExporter
 from scheduling_agent.core.exporters.orgmode_exporter import OrgModeExporter
 
 # Services and Components to Mock (needed for TaskManager.__init__)
 from scheduling_agent.core.nlp_processor import NLPProcessor
-from scheduling_agent.db.service import DatabaseService
+# We will mock DatabaseService specifically for TaskManager tests
+# from scheduling_agent.db.service import DatabaseService
+from scheduling_agent.db.service import DatabaseService # Keep this import for spec
 
 # Models and Enums to use (assuming they are defined or imported in TaskManager)
 from scheduling_agent.a2a.task_manager import (
@@ -45,10 +47,9 @@ def mock_nlp_processor() -> AsyncMock:
 @pytest.fixture
 def mock_db_service() -> AsyncMock:
     # Add minimal spec if needed by __init__
-    mock = AsyncMock(spec=DatabaseService)
-    # Add date_utils mock if needed by TaskManager init process (e.g., for default exporters)
-    mock.date_utils = MagicMock()
-    return mock
+    # Return a new AsyncMock for TaskManager tests
+    # Add spec=DatabaseService to ensure mock follows the service interface
+    return AsyncMock(spec=DatabaseService)
 
 
 @pytest.fixture
@@ -82,313 +83,427 @@ def task_manager(
     mock_db_service: AsyncMock,
     mock_conflict_resolver: AsyncMock,
     mock_exporters: dict,
-    test_session_factory: sessionmaker,  # Assuming this exists in conftest
 ) -> SchedulingTaskManager:
-    """Provides a SchedulingTaskManager instance."""
-    # Instantiate with mocks, even though new tests primarily check internal state
+    """Provides a SchedulingTaskManager instance with a mocked DB service."""
+    # Instantiate with mocks, TaskManager will use the injected mock_db_service
     manager = SchedulingTaskManager(
-        session_factory=test_session_factory,
+        # session_factory is no longer directly used by TaskManager
+        session_factory=None, # Pass None as TaskManager init expects it
         nlp_processor=mock_nlp_processor,
-        db_service=mock_db_service,
+        db_service=mock_db_service, # Inject the mock
         conflict_resolver=mock_conflict_resolver,
         exporters=mock_exporters,
     )
-    # Clear any potential tasks from previous tests if state persists across test functions
-    manager._tasks = {}
+    # Remove internal state clearing, as it relies on DB now
+    # manager._tasks = {}
     return manager
 
 
-# --- New State Management Unit Tests ---
+# --- New State Management Unit Tests (Refactored for DB Mocking) ---
 
 
 @pytest.mark.asyncio
-async def test_create_task_state(task_manager: SchedulingTaskManager):
-    """Verify create_task adds a task to the internal dictionary."""
+async def test_create_task_state(task_manager: SchedulingTaskManager, mock_db_service: AsyncMock):
+    """Verify create_task calls db_service.save_a2a_task."""
     task_id = str(uuid.uuid4())
     session_id = str(uuid.uuid4())
-    # Minimal params needed for state creation
-    params = TaskSendParams(
-        id=task_id,
-        sessionId=session_id,
-        message=Message(role="user", parts=[Part(type="text", text="test")]),
-    )
+    user_message = Message(role="user", parts=[Part(type="text", text="test")])
+    params = TaskSendParams(id=task_id, sessionId=session_id, message=user_message)
 
-    assert task_id not in task_manager._tasks
+    # Mock the return value expected from save_a2a_task (if create_task uses it)
+    # In this refactor, create_task constructs the task and calls save, then returns it.
+    # Let's assume create_task returns the constructed task object directly after saving.
+    # The test will primarily check the call to save_a2a_task.
+
+    # --- Act ---
     created_task = await task_manager.create_task(params=params)
 
-    assert task_id in task_manager._tasks
-    # Retrieve from dict directly to check what was stored
-    stored_task = task_manager._tasks[task_id]
-    assert stored_task.id == task_id
-    assert stored_task.sessionId == session_id
-    assert stored_task.status.state == TaskState.WORKING  # Check initial state per implementation
-    assert stored_task.params == params
-    # Check that the returned task is a deep copy
-    assert created_task == stored_task
-    assert created_task is not stored_task
+    # --- Assert ---
+    # Verify save_a2a_task was called correctly
+    mock_db_service.save_a2a_task.assert_awaited_once()
+    call_args, _ = mock_db_service.save_a2a_task.await_args
+    saved_task_arg = call_args[0]
+    assert isinstance(saved_task_arg, Task)
+    assert saved_task_arg.id == task_id
+    assert saved_task_arg.sessionId == session_id
+    assert saved_task_arg.params == params
+    # Check the initial state set by create_task (implementation detail)
+    assert saved_task_arg.status.state == TaskState.WORKING
+
+    # Check the returned task matches expected structure (id, state)
+    assert created_task.id == task_id
+    assert created_task.status.state == TaskState.WORKING
+    assert created_task.params == params
 
 
 @pytest.mark.asyncio
-async def test_get_task_state_found(task_manager: SchedulingTaskManager):
-    """Verify get_task retrieves an existing task from the internal dictionary."""
+async def test_get_task_state_found(task_manager: SchedulingTaskManager, mock_db_service: AsyncMock):
+    """Verify get_task calls db_service.get_a2a_task_by_id and returns the result."""
     task_id = str(uuid.uuid4())
-    task = Task(
+    # Mock the return value of the DB service call
+    mock_task = Task(
         id=task_id,
         sessionId=str(uuid.uuid4()),
         status=TaskStatus(state=TaskState.WORKING),
-        params=TaskSendParams(
-            id=task_id, message=Message(role="user", parts=[Part(type="text", text="test")])
-        ),
+        params=TaskSendParams(id=task_id, message=Message(role="user", parts=[Part(type="text", text="test")])),
         artifacts=[],
         history=[],
     )
-    task_manager._tasks[task_id] = task  # Manually insert for testing get
+    mock_db_service.get_a2a_task_by_id.return_value = mock_task
 
+    # --- Act ---
     retrieved_task = await task_manager.get_task(task_id)
 
+    # --- Assert ---
+    # Verify get_a2a_task_by_id was called correctly
+    mock_db_service.get_a2a_task_by_id.assert_awaited_once_with(task_id)
+    # Verify the returned task is the one from the DB service
     assert retrieved_task is not None
-    assert retrieved_task == task
-    # Check it's a copy
-    assert retrieved_task is not task
+    # TaskManager.get_task should return the object directly from DB service
+    assert retrieved_task == mock_task
+    # Check if get_task returns a copy or the original (depends on implementation)
+    # If it returns the direct object, this assertion is fine.
+    # assert retrieved_task is not mock_task
 
 
 @pytest.mark.asyncio
-async def test_get_task_state_not_found(task_manager: SchedulingTaskManager):
-    """Verify get_task returns None for a non-existent task."""
+async def test_get_task_state_not_found(task_manager: SchedulingTaskManager, mock_db_service: AsyncMock):
+    """Verify get_task returns None when db_service.get_a2a_task_by_id returns None."""
     task_id = str(uuid.uuid4())
-    assert task_id not in task_manager._tasks
+    # Mock the DB service to return None
+    mock_db_service.get_a2a_task_by_id.return_value = None
 
+    # --- Act ---
     retrieved_task = await task_manager.get_task(task_id)
 
+    # --- Assert ---
+    # Verify get_a2a_task_by_id was called
+    mock_db_service.get_a2a_task_by_id.assert_awaited_once_with(task_id)
+    # Verify None was returned
     assert retrieved_task is None
 
 
 @pytest.mark.asyncio
-async def test_update_task_status_state(task_manager: SchedulingTaskManager):
-    """Verify update_task_status modifies the status of an existing task."""
+async def test_update_task_status_state(task_manager: SchedulingTaskManager, mock_db_service: AsyncMock):
+    """Verify update_task_status calls db_service.update_a2a_task_status and get_a2a_task_by_id."""
     task_id = str(uuid.uuid4())
-    initial_status = TaskStatus(
-        state=TaskState.WORKING,
-        message=Message(role="agent", parts=[Part(type="text", text="Working...")]),
-    )
-    initial_task = Task(
-        id=task_id,
-        sessionId=str(uuid.uuid4()),
-        status=initial_status,
-        params=TaskSendParams(
-            id=task_id, message=Message(role="user", parts=[Part(type="text", text="test")])
-        ),
-        artifacts=[],
-        history=[],
-    )
-    task_manager._tasks[task_id] = initial_task
-
     new_status = TaskStatus(
         state=TaskState.COMPLETED,
         message=Message(role="agent", parts=[Part(type="text", text="Done!")]),
     )
-    updated_task = await task_manager.update_task_status(task_id, new_status)
+    # Mock the task that get_a2a_task_by_id will return *after* the update
+    updated_mock_task = Task(
+        id=task_id,
+        sessionId=str(uuid.uuid4()),
+        status=new_status, # Status reflects the update
+        params=TaskSendParams(id=task_id, message=Message(role="user", parts=[Part(type="text", text="test")])),
+        artifacts=[],
+        history=[TaskStatus(state=TaskState.WORKING)], # Simulate history being added by DB layer
+    )
+    mock_db_service.get_a2a_task_by_id.return_value = updated_mock_task
+    # We don't need to mock update_a2a_task_status return value as it returns None
 
-    assert task_id in task_manager._tasks
-    stored_task = task_manager._tasks[task_id]
-    assert stored_task.status == new_status
-    assert updated_task.status == new_status
-    assert len(stored_task.history) == 1
-    assert stored_task.history[0] == initial_status
-    assert len(updated_task.history) == 1
-    assert updated_task.history[0] == initial_status
-    # Check it's a copy
-    assert updated_task is not stored_task
+    # --- Act ---
+    updated_task_result = await task_manager.update_task_status(task_id, new_status)
+
+    # --- Assert ---
+    # Verify update_a2a_task_status was called
+    mock_db_service.update_a2a_task_status.assert_awaited_once_with(task_id, new_status)
+    # Verify get_a2a_task_by_id was called to fetch the updated task
+    mock_db_service.get_a2a_task_by_id.assert_awaited_once_with(task_id)
+    # Verify the returned task is the one fetched after update
+    assert updated_task_result == updated_mock_task
+    # Check if update_task_status returns a copy or the original (depends on implementation)
+    # assert updated_task_result is not updated_mock_task
 
 
 @pytest.mark.asyncio
-async def test_update_task_status_not_found(task_manager: SchedulingTaskManager):
-    """Verify update_task_status raises error for non-existent task."""
+async def test_update_task_status_not_found(task_manager: SchedulingTaskManager, mock_db_service: AsyncMock):
+    """Verify update_task_status raises TaskNotFoundError if db_service raises it."""
     task_id = str(uuid.uuid4())
     new_status = TaskStatus(state=TaskState.COMPLETED)
-    # Assuming TaskNotFoundError is defined and inherits from Exception
+    # Mock db_service.update_a2a_task_status to raise the error
+    mock_db_service.update_a2a_task_status.side_effect = TaskNotFoundError(task_id)
+
+    # --- Act & Assert ---
     with pytest.raises(TaskNotFoundError):
         await task_manager.update_task_status(task_id, new_status)
+    # Verify the DB service method was called
+    mock_db_service.update_a2a_task_status.assert_awaited_once_with(task_id, new_status)
+    # Verify get_task was NOT called after the error
+    mock_db_service.get_a2a_task_by_id.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_add_task_artifact_state(task_manager: SchedulingTaskManager):
-    """Verify add_task_artifact adds an artifact to an existing task."""
+async def test_add_task_artifact_state(task_manager: SchedulingTaskManager, mock_db_service: AsyncMock):
+    """Verify add_task_artifact calls get_task and save_a2a_task."""
     task_id = str(uuid.uuid4())
-    initial_task = Task(
+    artifact_to_add = Artifact(name="result", parts=[Part(type="text", text="some data")])
+
+    # Mock the task returned by the initial get_task call
+    initial_mock_task = Task(
         id=task_id,
         sessionId=str(uuid.uuid4()),
         status=TaskStatus(state=TaskState.WORKING),
-        params=TaskSendParams(
-            id=task_id, message=Message(role="user", parts=[Part(type="text", text="test")])
-        ),
-        artifacts=[],
+        params=TaskSendParams(id=task_id, message=Message(role="user", parts=[Part(type="text", text="test")])),
+        artifacts=[], # Starts empty
         history=[],
     )
-    task_manager._tasks[task_id] = initial_task
+    mock_db_service.get_a2a_task_by_id.return_value = initial_mock_task
+    # save_a2a_task returns None
 
-    artifact = Artifact(name="result", parts=[Part(type="text", text="some data")])
-    updated_task = await task_manager.add_task_artifact(task_id, artifact)
+    # Mock the task returned by get_task *after* save_a2a_task is called (if add_task_artifact re-fetches)
+    # Or, more simply, check the object passed to save_a2a_task and the object returned by add_task_artifact
 
-    assert task_id in task_manager._tasks
-    stored_task = task_manager._tasks[task_id]
-    assert len(stored_task.artifacts) == 1
-    assert stored_task.artifacts[0] == artifact
-    assert updated_task.artifacts[0] == artifact
-    # Check it's a copy
-    assert updated_task is not stored_task
+    # --- Act ---
+    returned_task = await task_manager.add_task_artifact(task_id, artifact_to_add)
+
+    # --- Assert ---
+    # Verify get_a2a_task_by_id was called first
+    mock_db_service.get_a2a_task_by_id.assert_awaited_once_with(task_id)
+
+    # Verify save_a2a_task was called with the updated task object
+    mock_db_service.save_a2a_task.assert_awaited_once()
+    call_args, _ = mock_db_service.save_a2a_task.await_args
+    saved_task_arg = call_args[0]
+    assert isinstance(saved_task_arg, Task)
+    assert saved_task_arg.id == task_id
+    assert len(saved_task_arg.artifacts) == 1
+    assert saved_task_arg.artifacts[0] == artifact_to_add # Check artifact was added
+
+    # Verify the returned task has the artifact added
+    assert returned_task is not None
+    assert len(returned_task.artifacts) == 1
+    assert returned_task.artifacts[0] == artifact_to_add
+    # Check the returned task state matches the saved task state
+    assert returned_task == saved_task_arg
 
 
 @pytest.mark.asyncio
-async def test_add_task_artifact_not_found(task_manager: SchedulingTaskManager):
-    """Verify add_task_artifact raises error for non-existent task."""
+async def test_add_task_artifact_not_found(task_manager: SchedulingTaskManager, mock_db_service: AsyncMock):
+    """Verify add_task_artifact raises TaskNotFoundError if get_task fails."""
     task_id = str(uuid.uuid4())
     artifact = Artifact(name="result", parts=[Part(type="text", text="some data")])
-    # Assuming TaskNotFoundError is defined and inherits from Exception
+    # Mock get_a2a_task_by_id to return None
+    mock_db_service.get_a2a_task_by_id.return_value = None
+
+    # --- Act & Assert ---
+    # Fix: Expect core.exceptions.TaskNotFoundError
     with pytest.raises(TaskNotFoundError):
         await task_manager.add_task_artifact(task_id, artifact)
 
+    # Verify get was called, save was not
+    mock_db_service.get_a2a_task_by_id.assert_awaited_once_with(task_id)
+    mock_db_service.save_a2a_task.assert_not_awaited()
+
 
 @pytest.mark.asyncio
-async def test_complete_task_state(task_manager: SchedulingTaskManager):
-    """Verify complete_task sets state to COMPLETED and adds optional artifact."""
+async def test_complete_task_state(task_manager: SchedulingTaskManager, mock_db_service: AsyncMock):
+    """Verify complete_task calls update_task_status and add_task_artifact (via db mocks)."""
     task_id = str(uuid.uuid4())
-    initial_task = Task(
-        id=task_id,
-        sessionId=str(uuid.uuid4()),
-        status=TaskStatus(state=TaskState.WORKING),
-        params=TaskSendParams(
-            id=task_id, message=Message(role="user", parts=[Part(type="text", text="test")])
-        ),
-        artifacts=[],
-        history=[],
-    )
-    task_manager._tasks[task_id] = initial_task
-
+    completion_message = Message(role="agent", parts=[Part(type="text", text="Task finished.")])
     final_artifact = Artifact(name="final_result", parts=[Part(type="data", data={"value": 123})])
-    completion_message = Message(role="agent", parts=[Part(type="text", text="Task finished.")])
-    updated_task = await task_manager.complete_task(task_id, completion_message, final_artifact)
 
-    assert task_id in task_manager._tasks
-    stored_task = task_manager._tasks[task_id]
-    assert stored_task.status.state == TaskState.COMPLETED
-    assert stored_task.status.message == completion_message
-    assert len(stored_task.artifacts) == 1
-    assert stored_task.artifacts[0] == final_artifact
-    assert updated_task == stored_task
+    # Mock the task returned after the status update
+    task_after_status_update = Task(
+        id=task_id,
+        sessionId=str(uuid.uuid4()),
+        status=TaskStatus(state=TaskState.COMPLETED, message=completion_message),
+        params=TaskSendParams(id=task_id, message=Message(role="user", parts=[Part(type="text", text="test")])),
+        artifacts=[], # Artifact not added yet
+        history=[TaskStatus(state=TaskState.WORKING)]
+    )
+    # Mock the task returned after the artifact is added (final state)
+    task_after_artifact_add = task_after_status_update.model_copy(deep=True)
+    task_after_artifact_add.artifacts.append(final_artifact)
+
+    # Mock get_a2a_task_by_id: First call (in update_task_status) returns task after status update,
+    # second call (in add_task_artifact) also returns it (before artifact is appended internally)
+    # third call (in add_task_artifact again after save) returns the final state.
+    # Let's simplify: update_task_status calls update and get. add_task_artifact calls get and save.
+    # Mock the get call within add_task_artifact
+    mock_db_service.get_a2a_task_by_id.side_effect = [
+        task_after_status_update, # Return for get call inside update_task_status
+        task_after_status_update, # Return for get call inside add_task_artifact
+    ]
+    # Mock update_a2a_task_status (returns None)
+    # Mock save_a2a_task (returns None)
+
+    # --- Act ---
+    final_returned_task = await task_manager.complete_task(task_id, completion_message, final_artifact)
+
+    # --- Assert ---
+    # Verify update_task_status was called
+    expected_status_update = TaskStatus(state=TaskState.COMPLETED, message=completion_message)
+    mock_db_service.update_a2a_task_status.assert_awaited_once_with(task_id, expected_status_update)
+    # Verify get was called (twice: once in update_task_status, once in add_task_artifact)
+    assert mock_db_service.get_a2a_task_by_id.await_count == 2
+    mock_db_service.get_a2a_task_by_id.assert_any_await(task_id)
+    # Verify save was called by add_task_artifact
+    mock_db_service.save_a2a_task.assert_awaited_once()
+    call_args, _ = mock_db_service.save_a2a_task.await_args
+    saved_task = call_args[0]
+    assert len(saved_task.artifacts) == 1
+    assert saved_task.artifacts[0] == final_artifact
+
+    # Verify the final returned task state
+    assert final_returned_task.status.state == TaskState.COMPLETED
+    assert final_returned_task.status.message == completion_message
+    assert len(final_returned_task.artifacts) == 1
+    assert final_returned_task.artifacts[0] == final_artifact
 
 
 @pytest.mark.asyncio
-async def test_complete_task_state_no_artifact(task_manager: SchedulingTaskManager):
-    """Verify complete_task works without an artifact."""
+async def test_complete_task_state_no_artifact(task_manager: SchedulingTaskManager, mock_db_service: AsyncMock):
+    """Verify complete_task calls update_task_status only (via db mock)."""
     task_id = str(uuid.uuid4())
-    initial_task = Task(
+    completion_message = Message(role="agent", parts=[Part(type="text", text="Task finished.")])
+    expected_status_update = TaskStatus(state=TaskState.COMPLETED, message=completion_message)
+
+    # Mock the task returned after the status update
+    task_after_status_update = Task(
         id=task_id,
         sessionId=str(uuid.uuid4()),
-        status=TaskStatus(state=TaskState.WORKING),
-        params=TaskSendParams(
-            id=task_id, message=Message(role="user", parts=[Part(type="text", text="test")])
-        ),
-        artifacts=[],
-        history=[],
+        status=expected_status_update,
+        params=TaskSendParams(id=task_id, message=Message(role="user", parts=[Part(type="text", text="test")])),
+        artifacts=[], 
+        history=[TaskStatus(state=TaskState.WORKING)]
     )
-    task_manager._tasks[task_id] = initial_task
+    mock_db_service.get_a2a_task_by_id.return_value = task_after_status_update
 
-    completion_message = Message(role="agent", parts=[Part(type="text", text="Task finished.")])
-    updated_task = await task_manager.complete_task(
-        task_id, completion_message, None
-    )  # Pass None for artifact
+    # --- Act ---
+    final_returned_task = await task_manager.complete_task(task_id, completion_message, None) # No artifact
 
-    assert task_id in task_manager._tasks
-    stored_task = task_manager._tasks[task_id]
-    assert stored_task.status.state == TaskState.COMPLETED
-    assert stored_task.status.message == completion_message
-    assert len(stored_task.artifacts) == 0  # No artifact added
-    assert updated_task == stored_task
+    # --- Assert ---
+    # Verify update_task_status was called
+    mock_db_service.update_a2a_task_status.assert_awaited_once_with(task_id, expected_status_update)
+    # Verify get was called by update_task_status
+    mock_db_service.get_a2a_task_by_id.assert_awaited_once_with(task_id)
+    # Verify add_task_artifact (and thus save_a2a_task) was NOT called
+    mock_db_service.save_a2a_task.assert_not_awaited()
+
+    # Verify the final returned task state
+    assert final_returned_task.status.state == TaskState.COMPLETED
+    assert final_returned_task.status.message == completion_message
+    assert len(final_returned_task.artifacts) == 0
 
 
 @pytest.mark.asyncio
-async def test_fail_task_state(task_manager: SchedulingTaskManager):
-    """Verify fail_task sets state to FAILED and adds error message."""
+async def test_fail_task_state(task_manager: SchedulingTaskManager, mock_db_service: AsyncMock):
+    """Verify fail_task calls update_task_status (via db mock)."""
     task_id = str(uuid.uuid4())
-    initial_task = Task(
-        id=task_id,
-        sessionId=str(uuid.uuid4()),
-        status=TaskStatus(state=TaskState.WORKING),
-        params=TaskSendParams(
-            id=task_id, message=Message(role="user", parts=[Part(type="text", text="test")])
-        ),
-        artifacts=[],
-        history=[],
-    )
-    task_manager._tasks[task_id] = initial_task
-
     error_message = Message(role="agent", parts=[Part(type="text", text="Something went wrong.")])
-    updated_task = await task_manager.fail_task(task_id, error_message)
+    expected_status_update = TaskStatus(state=TaskState.FAILED, message=error_message)
 
-    assert task_id in task_manager._tasks
-    stored_task = task_manager._tasks[task_id]
-    assert stored_task.status.state == TaskState.FAILED
-    assert stored_task.status.message == error_message
-    assert updated_task == stored_task
+    # Mock the task returned after the status update
+    task_after_status_update = Task(
+        id=task_id,
+        sessionId=str(uuid.uuid4()),
+        status=expected_status_update,
+        params=TaskSendParams(id=task_id, message=Message(role="user", parts=[Part(type="text", text="test")])),
+        artifacts=[], 
+        history=[TaskStatus(state=TaskState.WORKING)]
+    )
+    mock_db_service.get_a2a_task_by_id.return_value = task_after_status_update
+
+    # --- Act ---
+    final_returned_task = await task_manager.fail_task(task_id, error_message)
+
+    # --- Assert ---
+    # Verify update_task_status was called
+    mock_db_service.update_a2a_task_status.assert_awaited_once_with(task_id, expected_status_update)
+    # Verify get was called by update_task_status
+    mock_db_service.get_a2a_task_by_id.assert_awaited_once_with(task_id)
+    # Verify add_task_artifact was NOT called
+    mock_db_service.save_a2a_task.assert_not_awaited()
+
+    # Verify the final returned task state
+    assert final_returned_task.status.state == TaskState.FAILED
+    assert final_returned_task.status.message == error_message
 
 
 @pytest.mark.asyncio
-async def test_require_input_task_state(task_manager: SchedulingTaskManager):
-    """Verify require_input_task sets state to INPUT_REQUIRED and adds message/artifact."""
+async def test_require_input_task_state(task_manager: SchedulingTaskManager, mock_db_service: AsyncMock):
+    """Verify require_input_task calls update and add_artifact (via db mocks)."""
     task_id = str(uuid.uuid4())
-    initial_task = Task(
-        id=task_id,
-        sessionId=str(uuid.uuid4()),
-        status=TaskStatus(state=TaskState.WORKING),
-        params=TaskSendParams(
-            id=task_id, message=Message(role="user", parts=[Part(type="text", text="test")])
-        ),
-        artifacts=[],
-        history=[],
-    )
-    task_manager._tasks[task_id] = initial_task
-
     prompt_message = Message(role="agent", parts=[Part(type="text", text="Which option?")])
     input_artifact = Artifact(name="options", parts=[Part(type="data", data=["A", "B"])])
-    updated_task = await task_manager.require_input_task(task_id, prompt_message, input_artifact)
+    expected_status_update = TaskStatus(state=TaskState.INPUT_REQUIRED, message=prompt_message)
 
-    assert task_id in task_manager._tasks
-    stored_task = task_manager._tasks[task_id]
-    assert stored_task.status.state == TaskState.INPUT_REQUIRED
-    assert stored_task.status.message == prompt_message
-    assert len(stored_task.artifacts) == 1
-    assert stored_task.artifacts[0] == input_artifact
-    assert updated_task == stored_task
+    # Mock the task returned after the status update
+    task_after_status_update = Task(
+        id=task_id,
+        sessionId=str(uuid.uuid4()),
+        status=expected_status_update,
+        params=TaskSendParams(id=task_id, message=Message(role="user", parts=[Part(type="text", text="test")])),
+        artifacts=[], # Artifact not added yet
+        history=[TaskStatus(state=TaskState.WORKING)]
+    )
+    # Mock the final task state after artifact is added
+    task_after_artifact_add = task_after_status_update.model_copy(deep=True)
+    task_after_artifact_add.artifacts.append(input_artifact)
+
+    # Mock get calls
+    mock_db_service.get_a2a_task_by_id.side_effect = [
+        task_after_status_update, # For update_task_status
+        task_after_status_update, # For add_task_artifact
+    ]
+
+    # --- Act ---
+    final_returned_task = await task_manager.require_input_task(task_id, prompt_message, input_artifact)
+
+    # --- Assert ---
+    # Verify update_task_status was called
+    mock_db_service.update_a2a_task_status.assert_awaited_once_with(task_id, expected_status_update)
+    # Verify get was called twice
+    assert mock_db_service.get_a2a_task_by_id.await_count == 2
+    mock_db_service.get_a2a_task_by_id.assert_any_await(task_id)
+    # Verify save was called by add_task_artifact
+    mock_db_service.save_a2a_task.assert_awaited_once()
+    call_args, _ = mock_db_service.save_a2a_task.await_args
+    saved_task = call_args[0]
+    assert len(saved_task.artifacts) == 1
+    assert saved_task.artifacts[0] == input_artifact
+
+    # Verify the final returned task state
+    assert final_returned_task.status.state == TaskState.INPUT_REQUIRED
+    assert final_returned_task.status.message == prompt_message
+    assert len(final_returned_task.artifacts) == 1
+    assert final_returned_task.artifacts[0] == input_artifact
 
 
 @pytest.mark.asyncio
-async def test_require_input_task_state_no_artifact(task_manager: SchedulingTaskManager):
-    """Verify require_input_task works without an artifact."""
+async def test_require_input_task_state_no_artifact(task_manager: SchedulingTaskManager, mock_db_service: AsyncMock):
+    """Verify require_input_task calls update_task_status only (via db mock)."""
     task_id = str(uuid.uuid4())
-    initial_task = Task(
+    prompt_message = Message(role="agent", parts=[Part(type="text", text="Please confirm.")])
+    expected_status_update = TaskStatus(state=TaskState.INPUT_REQUIRED, message=prompt_message)
+
+    # Mock the task returned after the status update
+    task_after_status_update = Task(
         id=task_id,
         sessionId=str(uuid.uuid4()),
-        status=TaskStatus(state=TaskState.WORKING),
-        params=TaskSendParams(
-            id=task_id, message=Message(role="user", parts=[Part(type="text", text="test")])
-        ),
-        artifacts=[],
-        history=[],
+        status=expected_status_update,
+        params=TaskSendParams(id=task_id, message=Message(role="user", parts=[Part(type="text", text="test")])),
+        artifacts=[], 
+        history=[TaskStatus(state=TaskState.WORKING)]
     )
-    task_manager._tasks[task_id] = initial_task
+    mock_db_service.get_a2a_task_by_id.return_value = task_after_status_update
 
-    prompt_message = Message(role="agent", parts=[Part(type="text", text="Please confirm.")])
-    updated_task = await task_manager.require_input_task(
-        task_id, prompt_message, None
-    )  # Pass None for artifact
+    # --- Act ---
+    final_returned_task = await task_manager.require_input_task(task_id, prompt_message, None) # No artifact
 
-    assert task_id in task_manager._tasks
-    stored_task = task_manager._tasks[task_id]
-    assert stored_task.status.state == TaskState.INPUT_REQUIRED
-    assert stored_task.status.message == prompt_message
-    assert len(stored_task.artifacts) == 0  # No artifact added
-    assert updated_task == stored_task
+    # --- Assert ---
+    # Verify update_task_status was called
+    mock_db_service.update_a2a_task_status.assert_awaited_once_with(task_id, expected_status_update)
+    # Verify get was called by update_task_status
+    mock_db_service.get_a2a_task_by_id.assert_awaited_once_with(task_id)
+    # Verify add_task_artifact (and thus save_a2a_task) was NOT called
+    mock_db_service.save_a2a_task.assert_not_awaited()
 
+    # Verify the final returned task state
+    assert final_returned_task.status.state == TaskState.INPUT_REQUIRED
+    assert final_returned_task.status.message == prompt_message
+    assert len(final_returned_task.artifacts) == 0
 
-# TODO: Add tests for edge cases like updating/getting non-existent tasks if methods should raise errors.
+# TODO: Refactor test_cancel_task

@@ -32,6 +32,7 @@ from .types import (
     TaskState,
     TaskStatus,
 )
+from scheduling_agent.core.exceptions import TaskNotFoundError # Import directly
 
 logger = get_logger(__name__)
 
@@ -39,30 +40,28 @@ logger = get_logger(__name__)
 
 
 class SchedulingTaskManager:
-    """Manages the lifecycle and storage of A2A tasks."""
+    """Manages the lifecycle of A2A tasks by orchestrating DB operations."""
 
     def __init__(
         self,
-        session_factory: sessionmaker,  # Now required due to DatabaseService change
+        # session_factory: sessionmaker, # No longer needed directly
         nlp_processor: NLPProcessor,
         db_service: DatabaseService,
         conflict_resolver: ConflictResolver,
         exporters: dict[str, CalendarExporter] | None = None,
+        session_factory: sessionmaker | None = None, # Keep for backward compat if needed, but mark optional
     ):
-        """Initialize the task manager with dependencies and in-memory storage."""
+        """Initialize the task manager with dependencies."""
         self.nlp_processor = nlp_processor
-        self.db_service = db_service  # Service now needs factory injected where TM is created
+        self.db_service = db_service
         self.conflict_resolver = conflict_resolver
-        self.session_factory = (
-            session_factory  # Store factory if needed directly, or ensure db_service has it
-        )
-        # Add a basic DateUtils instance for placeholder parsing
-        self.date_utils = DateUtils()
+        # self.session_factory = session_factory # Removed direct usage
+        self.date_utils = DateUtils() # Keep for exporter initialization for now
 
         # Default exporters if none provided
         if exporters is None:
-            # TODO: DateUtils might need to be initialized/passed differently now
-            date_utils = self.db_service.date_utils  # Assuming db_service still has date_utils
+            # TODO: Revisit how date_utils is obtained if db_service no longer holds it
+            date_utils = self.date_utils 
             self.exporters = {
                 "ics": ICalExporter(date_utils=date_utils),
                 "org": OrgModeExporter(date_utils=date_utils),
@@ -70,148 +69,175 @@ class SchedulingTaskManager:
         else:
             self.exporters = exporters
 
-        self._tasks: dict[str, Task] = {}
-        self._task_locks: dict[str, asyncio.Lock] = {}
-        logger.info("SchedulingTaskManager initialized with in-memory storage.")
+        # Remove in-memory storage
+        # self._tasks: dict[str, Task] = {}
+        # self._task_locks: dict[str, asyncio.Lock] = {}
+        logger.info("SchedulingTaskManager initialized (Persistence via DatabaseService).")
 
-    async def _get_task_lock(self, task_id: str) -> asyncio.Lock:
-        """Gets or creates an asyncio lock for a given task ID."""
-        if task_id not in self._task_locks:
-            self._task_locks[task_id] = asyncio.Lock()
-        return self._task_locks[task_id]
+    # Remove locking mechanism, DB handles transaction atomicity
+    # async def _get_task_lock(self, task_id: str) -> asyncio.Lock:
+    #     ...
 
-    async def store_task(self, task: Task):
-        """Stores or updates a task in memory. Assumes lock is already held."""
-        task.updatedAt = datetime.now(UTC)
-        self._tasks[task.id] = task
-        logger.debug("Stored/Updated task", task_id=task.id, state=task.status.state)
+    # Remove direct storage method
+    # async def store_task(self, task: Task):
+    #    ...
 
     async def get_task(self, task_id: str) -> Task | None:
-        """Retrieves a task by ID."""
-        async with await self._get_task_lock(task_id):
-            task = self._tasks.get(task_id)
-            logger.debug("Retrieved task", task_id=task_id, found=(task is not None))
-            return task.model_copy(deep=True) if task else None  # Return a copy
+        """Retrieves a task by ID using the DatabaseService."""
+        logger.debug("Retrieving task via DB service", task_id=task_id)
+        # Directly delegate to DB service
+        task = await self.db_service.get_a2a_task_by_id(task_id)
+        logger.debug("Retrieved task from DB", task_id=task_id, found=(task is not None))
+        # DB service returns the Task object or None
+        return task
 
-    # --- NEW State Management Methods (Phase 1, Task 2) ---
+    # --- NEW State Management Methods (Refactored for DB Persistence) ---
 
     async def create_task(self, params: TaskSendParams) -> Task:
         """
-        Creates a new task, stores it in memory, and returns it.
+        Creates a new task object, saves it via DatabaseService, and returns it.
         Initial state is set to WORKING.
         """
         task_id = params.id
         session_id = params.sessionId
-        logger.info("Creating new task", task_id=task_id, session_id=session_id)
+        logger.info("Creating new task state object", task_id=task_id, session_id=session_id)
 
-        async with await self._get_task_lock(task_id):
-            if task_id in self._tasks:
-                # Handle potential ID collision, though UUIDs make this unlikely
-                logger.warning("Task ID collision detected", task_id=task_id)
-                # Depending on requirements, might raise error or overwrite
-                # For now, let's stick to the simple path for now and assume no collision.
-                # Or maybe just log and proceed to overwrite as store_task does?
-
-            task = Task(
-                id=task_id,
-                sessionId=session_id,
-                params=params,  # Store the input parameters
-                status=TaskStatus(state=TaskState.WORKING),  # Initial state
-                artifacts=[],
-                history=[],
-                createdAt=datetime.now(UTC),
-                updatedAt=datetime.now(UTC),
-            )
-            # Use store_task to handle actual storage and locking
-            await self.store_task(task)
-            # Return a copy to prevent external modification
-            return task.model_copy(deep=True)
+        # Construct the initial Task object
+        task = Task(
+            id=task_id,
+            sessionId=session_id,
+            params=params,  # Store the input parameters
+            status=TaskStatus(state=TaskState.WORKING),  # Initial state
+            artifacts=[],
+            history=[],
+            createdAt=datetime.now(UTC).replace(tzinfo=None), # Naive UTC
+            updatedAt=datetime.now(UTC).replace(tzinfo=None), # Naive UTC
+        )
+        
+        # Save task state using DatabaseService
+        try:
+            await self.db_service.save_a2a_task(task)
+            logger.info("Successfully saved initial task state to DB", task_id=task_id)
+            # Return the created task object 
+            # Note: save_a2a_task returns None, so we return the object we constructed.
+            return task 
+        except Exception as e:
+            logger.exception("Failed to save initial task state to DB", task_id=task_id, error=str(e))
+            # Decide error handling - re-raise? Return None? Raise specific internal error?
+            raise # Re-raise for now
 
     async def update_task_status(self, task_id: str, status: TaskStatus) -> Task:
         """
-        Updates the status of a task, adds the old status to history, and returns the updated task.
-        Raises TaskNotFoundError if the task doesn't exist.
+        Updates the task status via DatabaseService and returns the updated task.
+        Raises TaskNotFoundError if the task doesn't exist in DB.
         """
-        async with await self._get_task_lock(task_id):
-            task = self._tasks.get(task_id)
-            if not task:
-                logger.error("Task not found for status update", task_id=task_id)
-                raise TaskNotFoundError(f"Task with ID {task_id} not found.")
-
-            # Add previous status to history
-            task.history.append(task.status.model_copy(deep=True))
-            # Update status
-            task.status = status
-            # Update timestamp handled by store_task
-            await self.store_task(task)
-            logger.debug("Updated task status", task_id=task_id, new_state=status.state)
-            return task.model_copy(deep=True)
+        logger.debug("Updating task status via DB service", task_id=task_id, new_state=status.state)
+        try:
+            # Call DB service to update status and history
+            await self.db_service.update_a2a_task_status(task_id, status)
+            # Fetch the updated task state from DB to return
+            updated_task = await self.db_service.get_a2a_task_by_id(task_id)
+            if updated_task is None:
+                 # This case should ideally not happen if update succeeded, but handle defensively
+                 logger.error("Task not found after status update, potential DB inconsistency", task_id=task_id)
+                 raise TaskNotFoundError(f"Task {task_id} not found after status update.")
+            logger.debug("Successfully updated task status in DB", task_id=task_id)
+            return updated_task
+        except TaskNotFoundError: # Propagate TaskNotFoundError from DB service
+             logger.warning("Task not found in DB for status update", task_id=task_id)
+             raise
+        except Exception as e:
+             logger.exception("Failed to update task status in DB", task_id=task_id, error=str(e))
+             raise # Re-raise other exceptions
 
     async def add_task_artifact(self, task_id: str, artifact: Artifact) -> Task:
         """
-        Adds an artifact to a task and returns the updated task.
+        Adds an artifact to a task by fetching, modifying, and saving via DatabaseService.
         Raises TaskNotFoundError if the task doesn't exist.
         """
-        async with await self._get_task_lock(task_id):
-            task = self._tasks.get(task_id)
+        logger.debug("Adding artifact to task via DB service", task_id=task_id, artifact_name=artifact.name)
+        try:
+            # 1. Fetch the current task state
+            task = await self.get_task(task_id) # Use the refactored get_task
             if not task:
-                logger.error("Task not found for adding artifact", task_id=task_id)
-                raise TaskNotFoundError(f"Task with ID {task_id} not found.")
+                # get_task already logs and returns None, but TaskNotFoundError is expected here
+                raise TaskNotFoundError(task_id)
 
+            # 2. Modify the task object
+            # Ensure artifacts list exists (should be handled by Task model default factory)
+            if task.artifacts is None:
+                 task.artifacts = [] # Initialize if somehow None
             task.artifacts.append(artifact)
-            # Update timestamp handled by store_task
-            await self.store_task(task)
-            logger.debug("Added artifact to task", task_id=task_id, artifact_name=artifact.name)
-            return task.model_copy(deep=True)
+            task.updatedAt = datetime.now(UTC).replace(tzinfo=None) # Update timestamp
+
+            # 3. Save the updated task state back to DB
+            await self.db_service.save_a2a_task(task) # save handles upsert
+            logger.debug("Successfully saved task with new artifact to DB", task_id=task_id)
+            
+            # 4. Return the updated task object (the one we modified and saved)
+            return task
+        except TaskNotFoundError:
+             logger.warning("Task not found in DB for adding artifact", task_id=task_id)
+             raise
+        except Exception as e:
+             logger.exception("Failed to add artifact to task in DB", task_id=task_id, error=str(e))
+             raise # Re-raise other exceptions
 
     async def complete_task(
         self, task_id: str, message: Message, artifact: Artifact | None = None
     ) -> Task:
         """
         Sets task state to COMPLETED, adds message, optionally adds artifact.
+        Uses refactored state update methods.
         """
         logger.info("Completing task", task_id=task_id)
-        # Update status first
+        # Update status first (this now calls DB service)
         updated_task = await self.update_task_status(
             task_id, TaskStatus(state=TaskState.COMPLETED, message=message)
         )
 
-        # Add artifact if provided
+        # Add artifact if provided (this now calls DB service)
         if artifact:
-            updated_task = await self.add_task_artifact(task_id, artifact)
+            # We need to pass the artifact to the DB-aware method
+            # Note: update_task_status returns the *updated* task, so we use its ID
+            updated_task = await self.add_task_artifact(updated_task.id, artifact)
 
-        return updated_task  # Already a copy from add_task_artifact or update_task_status
+        return updated_task # Return the final state
 
     async def fail_task(self, task_id: str, message: Message) -> Task:
-        """Sets task state to FAILED, adds message."""
+        """
+        Sets task state to FAILED, adds message.
+        Uses refactored update_task_status.
+        """
         logger.error(
             "Failing task",
             task_id=task_id,
             reason=message.parts[0].text if message.parts else "Unknown",
         )
-        # Update status
+        # Update status (this now calls DB service)
         updated_task = await self.update_task_status(
             task_id, TaskStatus(state=TaskState.FAILED, message=message)
         )
-        return updated_task  # Already a copy
+        return updated_task # Return the final state
 
     async def require_input_task(
         self, task_id: str, message: Message, artifact: Artifact | None = None
     ) -> Task:
         """
         Sets task state to INPUT_REQUIRED, adds message, optionally adds artifact.
+        Uses refactored state update methods.
         """
         logger.info("Setting task to INPUT_REQUIRED", task_id=task_id)
-        # Update status first
+        # Update status first (this now calls DB service)
         updated_task = await self.update_task_status(
             task_id, TaskStatus(state=TaskState.INPUT_REQUIRED, message=message)
         )
 
-        # Add artifact if provided (e.g., options for input)
+        # Add artifact if provided (this now calls DB service)
         if artifact:
-            updated_task = await self.add_task_artifact(task_id, artifact)
+            updated_task = await self.add_task_artifact(updated_task.id, artifact)
 
-        return updated_task  # Already a copy
+        return updated_task # Return the final state
 
     # --- Placeholder Helper Methods --- #
     # --- These are removed as parsing logic belongs elsewhere --- #
@@ -224,6 +250,7 @@ class SchedulingTaskManager:
     async def cancel_task(self, task_id: str) -> Task:
         """
         Cancels a task if it's in a cancelable state.
+        Uses refactored state update methods.
 
         Args:
             task_id: The ID of the task to cancel.
@@ -236,34 +263,28 @@ class SchedulingTaskManager:
             TaskNotCancelableError: If the task is in a final state.
         """
         logger.info("Attempting to cancel task", task_id=task_id)
-        cancelable_states = {TaskState.SUBMITTED, TaskState.WORKING, TaskState.INPUT_REQUIRED}
+        cancelable_states = {TaskState.WORKING, TaskState.INPUT_REQUIRED, TaskState.SUBMITTED}
 
-        async with await self._get_task_lock(task_id):
-            task = self._tasks.get(task_id)
-            if not task:
-                logger.error("Task not found for cancellation", task_id=task_id)
-                raise TaskNotFoundError(f"Task with ID '{task_id}' not found for cancellation")
+        # Get current task state using the refactored method
+        task = await self.get_task(task_id)
+        if not task:
+            # get_task already logs and returns None, raise expected error
+            raise TaskNotFoundError(task_id)
 
-            if task.status.state not in cancelable_states:
-                logger.warning(
-                    "Attempted to cancel task in non-cancelable state",
-                    task_id=task_id,
-                    current_state=task.status.state,
-                )
-                raise TaskNotCancelableError(
-                    f"Task {task_id} is in state '{task.status.state}' and cannot be canceled."
-                )
-
-            # Update status to CANCELED
-            # Use the existing update_task_status which handles history and storage
-            updated_task = await self.update_task_status(
-                task_id,
-                TaskStatus(
-                    state=TaskState.CANCELED,
-                    message=Message(
-                        role="agent", parts=[Part(type="text", text="Task canceled by request.")]
-                    ),
-                ),
+        if task.status.state not in cancelable_states:
+            logger.warning(
+                "Attempted to cancel task in non-cancelable state",
+                task_id=task_id,
+                current_state=task.status.state,
             )
-            logger.info("Task canceled successfully", task_id=task_id)
-            return updated_task  # Return the updated task (already a copy)
+            raise TaskNotCancelableError(
+                f"Task {task_id} is in state {task.status.state} and cannot be canceled."
+            )
+
+        # Update state to CANCELED using the refactored method
+        cancellation_message = Message(role="agent", parts=[Part(type="text", text="Task canceled by request.")])
+        updated_task = await self.update_task_status(
+            task_id, TaskStatus(state=TaskState.CANCELED, message=cancellation_message)
+        )
+        logger.info("Task successfully canceled", task_id=task_id)
+        return updated_task

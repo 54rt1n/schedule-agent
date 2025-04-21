@@ -42,7 +42,7 @@ def create_db_engine(db_url: str) -> AsyncEngine:
         if db_url.startswith("sqlite"):
 
             @event.listens_for(engine.sync_engine, "connect")
-            def _enable_wal(dbapi_con):
+            def _enable_wal(dbapi_con, connection_record):
                 cursor = dbapi_con.cursor()
                 try:
                     cursor.execute("PRAGMA journal_mode=WAL;")

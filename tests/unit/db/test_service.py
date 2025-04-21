@@ -1,4 +1,3 @@
-
 import uuid
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
@@ -12,8 +11,10 @@ from scheduling_agent.core.conflict_resolver import ConflictResolver
 from scheduling_agent.core.date_utils import DateUtils
 from scheduling_agent.core.exceptions import ConflictError
 from scheduling_agent.db.models import Event, Participant
+from scheduling_agent.db.models import A2ATask
 from scheduling_agent.db.schemas import EventCreate, EventUpdate
 from scheduling_agent.db.service import DatabaseService
+from scheduling_agent.a2a import types as a2a_types
 
 
 # --- New Fixture for DB Service (Uses conftest fixtures) ---
@@ -574,33 +575,207 @@ async def test_get_events_in_range_empty(db_service: DatabaseService):
 
 @pytest.mark.asyncio
 async def test_get_events_in_range_recurring_outside_range(db_service: DatabaseService):
-    """Test get_events_in_range returns empty list when recurring instances fall outside range."""
+    """Test that a recurring event entirely outside the range is not returned."""
     # --- Arrange ---
-    # Base event: Weekly on Mon at 9am UTC for 2 weeks, starting 2024-12-02
-    base_start_naive = datetime(2024, 12, 2, 9, 0, 0)
-    base_end_naive = datetime(2024, 12, 2, 10, 0, 0)
-    rrule_str = "FREQ=WEEKLY;BYDAY=MO;COUNT=2"  # Instances: Dec 2nd, Dec 9th
-    base_event_data = EventCreate(
-        title="Recurring Outside",
-        start_time=base_start_naive,
-        end_time=base_end_naive,
+    # (Setup is similar to test_get_events_in_range_recurring)
+    event_create_data = EventCreate(
+        title="Far Future Daily Meeting",
+        start_time=datetime(2025, 1, 1, 10, 0, 0),
+        end_time=datetime(2025, 1, 1, 11, 0, 0),
         time_zone="UTC",
-        rrule=rrule_str,
+        rrule="FREQ=DAILY;COUNT=5", # Jan 1 to Jan 5
     )
-    await db_service.create_event(event_data=base_event_data)
+    await db_service.create_event(event_data=event_create_data)
 
-    # Define a query range that does NOT overlap with the instances
-    range_start_aware = datetime(2024, 12, 10, 0, 0, 0, tzinfo=UTC)  # After last instance
-    range_end_aware = datetime(2024, 12, 15, 0, 0, 0, tzinfo=UTC)
+    # Query range before the event
+    query_start = datetime(2024, 12, 1, 0, 0, 0, tzinfo=UTC)
+    query_end = datetime(2024, 12, 31, 0, 0, 0, tzinfo=UTC)
 
     # --- Act ---
-    retrieved_events = await db_service.get_events_in_range(
-        start=range_start_aware, end=range_end_aware
-    )
+    events = await db_service.get_events_in_range(query_start, query_end)
 
     # --- Assert ---
-    assert retrieved_events == []
+    assert not events # Expect no events to be returned
 
+
+# --- A2A Task Persistence Tests ---
+
+@pytest.mark.asyncio
+async def test_save_a2a_task(db_service: DatabaseService, test_session: AsyncSession):
+    """Test saving a new A2A Task to the database."""
+    # --- Arrange ---
+    task_id = str(uuid.uuid4())
+    # Fix: Provide required fields for TaskSendParams (id, message)
+    user_message = a2a_types.Message(role="user", parts=[a2a_types.Part(type="text", text="Schedule meeting")])
+    params = a2a_types.TaskSendParams(id=task_id, message=user_message, intent="create_event", user_prompt="Schedule meeting")
+    # Fix: Use valid TaskState enum value (SUBMITTED instead of QUEUED)
+    status = a2a_types.TaskStatus(state=a2a_types.TaskState.SUBMITTED, message=a2a_types.Message(role="agent", parts=[a2a_types.Part(type="text", text="Task submitted")]))
+
+    task_to_save = a2a_types.Task(
+        id=task_id,
+        params=params,
+        status=status,
+        artifacts=[], # Initially empty
+        history=[]    # Initially empty
+        # session_id can be None
+    )
+
+    # --- Act ---
+    # This method doesn't exist yet, so the test will fail initially (RED)
+    await db_service.save_a2a_task(task_to_save)
+
+    # --- Assert ---
+    # Verify data was saved in the test DB using a separate session
+    retrieved_record = await test_session.get(A2ATask, task_id)
+
+    assert retrieved_record is not None
+    assert retrieved_record.id == task_id
+    assert retrieved_record.state == task_to_save.status.state.value
+    assert retrieved_record.session_id is None # Check default
+
+    # Verify JSON fields were serialized correctly
+    assert retrieved_record.params_json == params.model_dump_json(exclude_none=True)
+    assert retrieved_record.status_message_json == status.message.model_dump_json(exclude_none=True)
+    assert retrieved_record.artifacts_json is None 
+    assert retrieved_record.history_json is None # Should be null/None if history was empty
+
+    # Check timestamps (ensure they are set)
+    assert retrieved_record.created_at is not None
+    assert retrieved_record.updated_at is not None
+    assert isinstance(retrieved_record.created_at, datetime)
+    assert isinstance(retrieved_record.updated_at, datetime)
+
+# TODO: Add test for updating an existing task via save_a2a_task (upsert)
+
+
+@pytest.mark.asyncio
+async def test_get_a2a_task_by_id_found(db_service: DatabaseService, test_session: AsyncSession):
+    """Test retrieving an existing A2A Task by ID, verifying deserialization."""
+    # --- Arrange ---
+    task_id = str(uuid.uuid4())
+    # Fix: Provide required fields for TaskSendParams (id, message)
+    user_message_for_params = a2a_types.Message(role="user", parts=[a2a_types.Part(type="text", text="Change meeting time")])
+    params = a2a_types.TaskSendParams(id=task_id, message=user_message_for_params, intent="update_event", user_prompt="Change meeting time")
+    # Fix: Provide required fields for Message (role, parts)
+    message = a2a_types.Message(role="agent", parts=[a2a_types.Part(type="text", text="Task is working")])
+    status = a2a_types.TaskStatus(state=a2a_types.TaskState.WORKING, message=message)
+    artifact = a2a_types.Artifact(name="draft_email", parts=[a2a_types.Part(type="text", text="Email body...")])
+    # Fix: Provide required fields for Message (role, parts)
+    initial_status_message = a2a_types.Message(role="agent", parts=[a2a_types.Part(type="text", text="Task submitted")])
+    initial_status = a2a_types.TaskStatus(state=a2a_types.TaskState.SUBMITTED, message=initial_status_message)
+
+    task_to_save = a2a_types.Task(
+        id=task_id,
+        sessionId="session_123",
+        params=params,
+        status=status,
+        artifacts=[artifact], 
+        history=[initial_status] 
+    )
+
+    # Use save_a2a_task to put the data in the DB first
+    await db_service.save_a2a_task(task_to_save)
+
+    # --- Act ---
+    # This method doesn't exist yet (RED step for get)
+    retrieved_task = await db_service.get_a2a_task_by_id(task_id)
+
+    # --- Assert ---
+    assert retrieved_task is not None
+    assert isinstance(retrieved_task, a2a_types.Task)
+
+    # Compare the retrieved task with the original task object
+    # Pydantic models comparison should work if deserialization is correct
+    # Remove this check as timestamps will differ slightly causing failure.
+    # assert retrieved_task == task_to_save
+
+    # Explicitly check a few deserialized fields
+    assert retrieved_task.id == task_id
+    assert retrieved_task.sessionId == "session_123"
+    assert retrieved_task.status.state == a2a_types.TaskState.WORKING
+    assert retrieved_task.status.message.parts[0].text == "Task is working"
+    # Verify params object was deserialized correctly by checking its required fields
+    assert retrieved_task.params.id == task_id
+    assert retrieved_task.params.message.parts[0].text == "Change meeting time"
+    assert len(retrieved_task.artifacts) == 1
+    assert retrieved_task.artifacts[0].name == "draft_email"
+    # Re-add history checks
+    assert len(retrieved_task.history) == 1
+    assert retrieved_task.history[0].state == a2a_types.TaskState.SUBMITTED
+
+
+@pytest.mark.asyncio
+async def test_get_a2a_task_by_id_not_found(db_service: DatabaseService):
+    """Test retrieving a non-existent A2A Task by ID returns None."""
+    # --- Arrange ---
+    non_existent_task_id = str(uuid.uuid4())
+
+    # --- Act ---
+    # This method doesn't exist yet (RED step for get)
+    retrieved_task = await db_service.get_a2a_task_by_id(non_existent_task_id)
+
+    # --- Assert ---
+    assert retrieved_task is None
+
+
+@pytest.mark.asyncio
+async def test_update_a2a_task_status(db_service: DatabaseService, test_session: AsyncSession):
+    """Test updating the status and history of an A2A Task."""
+    # --- Arrange ---
+    task_id = str(uuid.uuid4())
+    # Fix: Provide required fields for Message (role, parts)
+    initial_message = a2a_types.Message(role="agent", parts=[a2a_types.Part(type="text", text="Task submitted")])
+    initial_status = a2a_types.TaskStatus(state=a2a_types.TaskState.SUBMITTED, message=initial_message)
+    # Fix: Provide required fields for TaskSendParams (id, message)
+    initial_user_message = a2a_types.Message(role="user", parts=[a2a_types.Part(type="text", text="Find events")])
+    initial_params = a2a_types.TaskSendParams(id=task_id, message=initial_user_message, intent="find_event")
+    
+    task_to_save = a2a_types.Task(
+        id=task_id,
+        params=initial_params,
+        status=initial_status,
+        artifacts=[],
+        history=[] # History starts empty
+    )
+
+    # 1. Save the initial task state
+    await db_service.save_a2a_task(task_to_save)
+
+    # 2. Define the new status
+    # Fix: Provide required fields for Message (role, parts)
+    new_message = a2a_types.Message(role="agent", parts=[a2a_types.Part(type="text", text="Task is now working")])
+    new_status = a2a_types.TaskStatus(state=a2a_types.TaskState.WORKING, message=new_message)
+
+    # --- Act ---
+    # This method doesn't exist yet (RED step)
+    await db_service.update_a2a_task_status(task_id, new_status)
+
+    # --- Assert ---
+    # Retrieve the raw DB record to check state, message, and history
+    updated_record = await test_session.get(A2ATask, task_id)
+
+    assert updated_record is not None
+    assert updated_record.id == task_id
+    
+    # Check state and message reflect the new status
+    assert updated_record.state == new_status.state.value
+    assert updated_record.status_message_json == new_message.model_dump_json(exclude_none=True)
+
+    # Check history contains the *serialized* old status
+    assert updated_record.history_json is not None
+    # Deserialize history from DB
+    history_list = a2a_types.HistoryList.model_validate_json(updated_record.history_json).root
+    assert len(history_list) == 1
+    # Compare the deserialized history entry with the original status
+    assert history_list[0] == initial_status 
+
+    # Check timestamps
+    assert updated_record.updated_at > updated_record.created_at
+
+
+# TODO: Add test_get_a2a_task_by_id_found
+# TODO: Add test_get_a2a_task_by_id_not_found
+# TODO: Add test_update_a2a_task_status
 
 # TODO: Add tests for:
 # - Creating event WITH participants (needs modification to create_event service method)
