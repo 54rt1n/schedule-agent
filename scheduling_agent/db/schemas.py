@@ -33,3 +33,5 @@ class EventUpdate(SQLModel):
     notes: str | None = None
     rrule: str | None = None
     # TODO: How to handle participant updates? Add/remove lists?
+    # Field to indicate modification of a specific recurring instance
+    original_start_time: datetime | None = None

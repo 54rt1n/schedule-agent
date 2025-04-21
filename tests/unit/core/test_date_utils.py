@@ -1,5 +1,5 @@
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, time
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -667,3 +667,100 @@ def test_expand_recurrence_dst_with_modification(date_utils: DateUtils):
     assert mod_instance_data is not None
     assert mod_instance_data["title"] == mod_title
     assert mod_instance_data["modified_instance_id"] is not None
+
+
+# --- Tests for parse_nlp_date_range --- #
+
+def test_parse_nlp_date_range_defaults(date_utils: DateUtils):
+    """Test parsing with default values ('today' to 'next Sunday')."""
+    # Note: The exact dates depend on when the test is run.
+    # We mainly check that it returns a valid range and times are set correctly.
+    start_utc, end_utc = date_utils.parse_nlp_date_range(None, None)
+
+    assert isinstance(start_utc, datetime)
+    assert isinstance(end_utc, datetime)
+    assert start_utc.tzinfo == UTC
+    assert end_utc.tzinfo == UTC
+
+    # Check times are set to start/end of day
+    assert start_utc.time() == time.min
+    assert end_utc.time() == time(23, 59, 59, 999999)
+
+    # Check start is before end, and roughly 7 days apart (can vary slightly with defaults)
+    assert start_utc < end_utc
+    assert (end_utc - start_utc) >= timedelta(days=6)
+    assert (end_utc - start_utc) < timedelta(days=8)
+
+def test_parse_nlp_date_range_specific_strings(date_utils: DateUtils):
+    """Test parsing with specific valid date strings."""
+    start_str = "2024-08-15"
+    end_str = "August 18, 2024"
+
+    start_utc, end_utc = date_utils.parse_nlp_date_range(start_str, end_str)
+
+    expected_start = datetime(2024, 8, 15, 0, 0, 0, tzinfo=UTC)
+    expected_end = datetime(2024, 8, 18, 23, 59, 59, 999999, tzinfo=UTC)
+
+    assert start_utc == expected_start
+    assert end_utc == expected_end
+
+def test_parse_nlp_date_range_relative_strings(date_utils: DateUtils):
+    """Test parsing with relative date strings like 'tomorrow'."""
+    start_str = "tomorrow"
+    end_str = "in 3 days"
+
+    start_utc, end_utc = date_utils.parse_nlp_date_range(start_str, end_str)
+
+    today = datetime.now(UTC).date()
+    tomorrow = today + timedelta(days=1)
+    in_3_days = today + timedelta(days=3)
+
+    expected_start = datetime.combine(tomorrow, time.min, tzinfo=UTC)
+    expected_end = datetime.combine(in_3_days, time(23, 59, 59, 999999), tzinfo=UTC)
+
+    assert start_utc == expected_start
+    assert end_utc == expected_end
+
+def test_parse_nlp_date_range_start_after_end(date_utils: DateUtils):
+    """Test parsing where initial end date is before start date."""
+    start_str = "2024-09-10"
+    end_str = "2024-09-05" # End date is before start date
+
+    start_utc, end_utc = date_utils.parse_nlp_date_range(start_str, end_str)
+
+    expected_start = datetime(2024, 9, 10, 0, 0, 0, tzinfo=UTC)
+    # End date should be adjusted to 7 days after start
+    expected_end_date = datetime(2024, 9, 17).date()
+    expected_end = datetime.combine(expected_end_date, time(23, 59, 59, 999999), tzinfo=UTC)
+
+    assert start_utc == expected_start
+    assert end_utc == expected_end
+
+def test_parse_nlp_date_range_invalid_input(date_utils: DateUtils):
+    """Test parsing with invalid date strings falls back gracefully."""
+    start_str = "not a date"
+    end_str = "also not a date"
+
+    # Should fallback to defaults (today -> today + 7 days)
+    start_utc, end_utc = date_utils.parse_nlp_date_range(start_str, end_str)
+
+    assert isinstance(start_utc, datetime)
+    assert isinstance(end_utc, datetime)
+    assert start_utc.tzinfo == UTC
+    assert end_utc.tzinfo == UTC
+    assert start_utc < end_utc
+
+def test_parse_nlp_date_range_partial_invalid(date_utils: DateUtils):
+    """Test parsing with one valid and one invalid string."""
+    start_str = "2024-10-01"
+    end_str = "invalid end"
+
+    start_utc, end_utc = date_utils.parse_nlp_date_range(start_str, end_str)
+
+    expected_start = datetime(2024, 10, 1, 0, 0, 0, tzinfo=UTC)
+    # End should default to 7 days after the valid start
+    expected_end_date = datetime(2024, 10, 8).date()
+    expected_end = datetime.combine(expected_end_date, time(23, 59, 59, 999999), tzinfo=UTC)
+
+    assert start_utc == expected_start
+    assert end_utc == expected_end

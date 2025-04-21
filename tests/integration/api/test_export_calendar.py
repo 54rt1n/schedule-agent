@@ -47,7 +47,7 @@ async def test_export_calendar_success(
         date_info=LLMDateInfo(start_date="next week start", end_date="next week end"),
         filters={"format": "ics"},
     )
-    mock_nlp_processor.parse_natural_language_query.return_value = mock_nlp_result
+    mock_nlp_processor.process.return_value = mock_nlp_result
 
     # 2. Mock Database Service to return events
     mock_events = [
@@ -126,7 +126,7 @@ async def test_export_calendar_success(
 
     # Assert mock calls
     mock_task_manager.create_task.assert_called_once()
-    mock_nlp_processor.parse_natural_language_query.assert_awaited_once_with(query)
+    mock_nlp_processor.process.assert_awaited_once_with(query)
     mock_db_service.get_events_in_range.assert_awaited_once()
     mock_task_manager.complete_task.assert_awaited_once()
     # TODO: Assert artifact details passed to complete_task
@@ -154,7 +154,7 @@ async def test_export_calendar_unsupported_format(
         intent="export_calendar",
         filters=mock_filters,  # Use the LLMFilters instance
     )
-    mock_nlp_processor.parse_natural_language_query.return_value = mock_nlp_result
+    mock_nlp_processor.process.return_value = mock_nlp_result
 
     # Prepare RPC request
     params = TaskSendParams(
@@ -180,7 +180,7 @@ async def test_export_calendar_unsupported_format(
 
     # Assert mock calls
     mock_task_manager.create_task.assert_called_once()
-    mock_nlp_processor.parse_natural_language_query.assert_awaited_once_with(query)
+    mock_nlp_processor.process.assert_awaited_once_with(query)
     mock_db_service.get_events_in_range.assert_not_called()
     mock_task_manager.complete_task.assert_not_called()
     mock_task_manager.fail_task.assert_not_called()  # Should raise before failing task

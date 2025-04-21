@@ -1,6 +1,7 @@
 import uuid
 from datetime import UTC, datetime
 
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, sessionmaker
 from sqlmodel import select
 
@@ -13,15 +14,17 @@ from scheduling_agent.logging_config import get_logger
 from .database import get_async_session
 
 # Import DB models from .models
-from .models import Event, Participant, A2ATask
+from .models import Event, Participant, A2ATask, ModifiedInstance
 # Import A2A types
 from scheduling_agent.a2a import types as a2a_types
+from scheduling_agent.a2a.types import EventQuery
 
 # Import DTO schemas from .schemas
 from .schemas import EventCreate, EventUpdate
 
 logger = get_logger(__name__)
 
+# TODO: This service is very complex and needs to be broken down into smaller, more manageable modules.
 
 class DatabaseService:
     """Handles database operations for the scheduling agent."""
@@ -219,35 +222,260 @@ class DatabaseService:
 
         return final_event_instances
 
-    async def update_event(self, event_id: uuid.UUID, update_data: EventUpdate) -> Event | None:
-        """Updates an existing event.
-
-        Args:
-            event_id: The ID of the event to update.
-            update_data: An EventUpdate model with fields to update.
-
-        Returns:
-            The updated Event object, or None if the event was not found.
-        """
+    async def find_events(self, query: EventQuery) -> list[Event]:
+        """Finds events based on criteria in the EventQuery object."""
+        logger.info("Finding events based on query", query=query.model_dump(exclude_unset=True))
         async with get_async_session(self.session_factory) as session:
-            # Retrieve the existing event
-            db_event = await session.get(Event, event_id)
+            stmt = select(Event)
+
+            # Basic filtering - Start with title if provided
+            if query.title:
+                # Use ilike for case-insensitive partial matching
+                stmt = stmt.where(Event.title.ilike(f"%{query.title}%"))
+
+            # TODO: Add filtering for other EventQuery fields (start_time, end_time, participants, etc.)
+            # This might involve logic similar to get_events_in_range for time overlaps
+
+            # Add options to load related data if needed by callers
+            stmt = stmt.options(
+                selectinload(Event.participants),
+                selectinload(Event.excluded_dates),
+                selectinload(Event.modified_instances),
+            )
+
+            result = await session.execute(stmt)
+            events = list(result.scalars().unique().all())
+            logger.info(f"Found {len(events)} events matching query", query=query.model_dump(exclude_unset=True))
+            return events
+
+    # --- Phase 2 Implementation: Update Event --- #
+
+    async def _handle_recurring_instance_update(
+        self,
+        session: AsyncSession, # Need the session passed in
+        db_event: Event, # Pass the fetched base event
+        update_data: EventUpdate
+    ) -> ModifiedInstance | None: # Return the actual ModifiedInstance
+        """Handles updating a specific instance of a recurring event."""
+        logger.info(
+            "Handling update for specific instance of recurring event",
+            event_id=db_event.id,
+            original_start_time=update_data.original_start_time
+        )
+
+        # 1. Validate input
+        if not update_data.original_start_time:
+            # This should ideally be caught earlier or by routing logic
+            logger.error("original_start_time missing for recurring instance update", event_id=db_event.id)
+            raise ValueError("original_start_time is required to update a specific recurring instance.")
+        if not update_data.start_time or not update_data.end_time or not update_data.time_zone:
+            logger.error("New start_time, end_time, and time_zone are required when updating an instance time", event_id=db_event.id)
+            raise ValueError("New start_time, end_time, and time_zone are required when updating an instance time.")
+
+        # Convert original_start_time to naive UTC for DB comparison
+        original_start_naive_utc = self.date_utils.normalize_to_utc(
+            update_data.original_start_time, tz_name=db_event.time_zone # Use base event's TZ for original time
+        ).replace(tzinfo=None)
+
+        # Convert new times to naive UTC using the *newly* provided timezone
+        new_start_naive_utc = self.date_utils.normalize_to_utc(
+            update_data.start_time, tz_name=update_data.time_zone
+        ).replace(tzinfo=None)
+        new_end_naive_utc = self.date_utils.normalize_to_utc(
+            update_data.end_time, tz_name=update_data.time_zone
+        ).replace(tzinfo=None)
+
+        # TODO: Add conflict checking for the *new* time slot
+        # This requires adapting the conflict checker or creating a temporary event data object
+
+        # 2. Find or Create ModifiedInstance record
+        stmt = select(ModifiedInstance).where(
+            ModifiedInstance.event_id == db_event.id,
+            ModifiedInstance.original_date == original_start_naive_utc
+        )
+        result = await session.execute(stmt)
+        mod_instance = result.scalar_one_or_none()
+
+        update_dict = update_data.model_dump(exclude_unset=True)
+        # Remove fields specific to identifying the instance
+        update_dict.pop('original_start_time', None)
+
+        if mod_instance:
+            logger.debug("Found existing ModifiedInstance, updating", mod_instance_id=mod_instance.id)
+            # Update existing instance
+            mod_instance.start_time = new_start_naive_utc
+            mod_instance.end_time = new_end_naive_utc
+            mod_instance.time_zone = update_data.time_zone # Update timezone
+            # Apply other optional updates
+            mod_instance.title = update_dict.get('title', mod_instance.title)
+            mod_instance.location = update_dict.get('location', mod_instance.location)
+            mod_instance.notes = update_dict.get('notes', mod_instance.notes)
+            # updated_at handled by DB trigger
+        else:
+            logger.debug("Creating new ModifiedInstance")
+            # Create new instance
+            mod_instance = ModifiedInstance(
+                event_id=db_event.id,
+                original_date=original_start_naive_utc,
+                start_time=new_start_naive_utc,
+                end_time=new_end_naive_utc,
+                time_zone=update_data.time_zone,
+                # Apply optional fields or use base event defaults?
+                # Let's use the update payload, falling back to base event
+                title=update_dict.get('title', db_event.title),
+                location=update_dict.get('location', db_event.location),
+                notes=update_dict.get('notes', db_event.notes),
+            )
+            session.add(mod_instance)
+
+        # 3. Commit changes (assuming outer method handles commit)
+        # await session.commit() # Commit happens in the calling update_event
+
+        # Return the persistent ModifiedInstance object
+        return mod_instance
+
+    async def update_event(self, event_id: uuid.UUID, update_data: EventUpdate) -> Event | ModifiedInstance | None:
+        """Updates an existing event, handling non-recurring and single recurring instances."""
+        # Args:
+        #     event_id: The ID of the event to update.
+        #     update_data: An EventUpdate model with fields to update.
+        # Returns:
+        #     The updated Event object (or instance representation), or None if not found.
+        # Raises:
+        #     NotImplementedError: If attempting to update a recurring series or time on non-recurring.
+        #     ValueError: If required fields for instance update are missing.
+
+        async with get_async_session(self.session_factory) as session:
+            # 1. Retrieve the existing event
+            # Eager load modified instances needed for recurrence checks if applicable
+            # We might need it if we enhance instance update logic later
+            result = await session.execute(
+                select(Event).where(Event.id == event_id).options(selectinload(Event.modified_instances))
+            )
+            db_event = result.scalar_one_or_none()
+
             if not db_event:
+                logger.warning("Attempted to update non-existent event", event_id=event_id)
                 return None
 
-            # Get the update data as a dictionary, excluding unset fields
-            update_dict = update_data.model_dump(exclude_unset=True)
+            # 2. Determine update type (base, instance, series)
+            is_instance_update = update_data.original_start_time is not None
+            # is_series_update = ... # Logic to determine series update (e.g., specific flag or only rrule change)
 
-            # Update the model fields
-            for key, value in update_dict.items():
-                setattr(db_event, key, value)
+            if is_instance_update:
+                if not db_event.rrule:
+                    logger.error("Attempted instance update on non-recurring event", event_id=event_id)
+                    raise ValueError("Cannot specify original_start_time for a non-recurring event.")
+                # Delegate to instance handler
+                # Pass the session to the helper
+                updated_instance = await self._handle_recurring_instance_update(session, db_event, update_data)
+                # updated_instance is now the persistent ModifiedInstance
+                await session.commit() # Commit changes made by helper
+                # Refresh might be needed if the helper didn't
+                if updated_instance: await session.refresh(updated_instance) # Refresh the persistent object
+                return updated_instance
+            elif db_event.rrule: # Handle attempt to update a recurring event *without* specifying instance/series
+                # This is now treated as a potential simple series update
+                logger.debug("Handling potential simple series update", event_id=event_id)
+                update_dict = update_data.model_dump(exclude_unset=True)
 
-            # Mark as modified and commit
-            session.add(db_event)
-            await session.commit()
-            await session.refresh(db_event)
-            # TODO: Handle participant updates (add/remove)
-            return db_event
+                # Disallow time/timezone updates for the whole series for now
+                if "start_time" in update_dict or "end_time" in update_dict or "time_zone" in update_dict:
+                    logger.error("Updating time/timezone for the entire series is not supported yet.", event_id=event_id)
+                    # TODO: This might require deleting all ModifiedInstances, or more complex logic
+                    raise NotImplementedError("Updating time/timezone for the entire series is not supported yet.")
+
+                # Apply allowed updates (title, location, notes, rrule?)
+                updated = False
+                allowed_series_fields = ["title", "location", "notes", "rrule"]
+                for key, value in update_dict.items():
+                    if key in allowed_series_fields and hasattr(db_event, key) and getattr(db_event, key) != value:
+                        setattr(db_event, key, value)
+                        updated = True
+
+                if updated:
+                    # If updating the series, should we clear existing ModifiedInstances?
+                    # For now, let's assume simple updates don't invalidate instances.
+                    # TODO: Revisit this assumption - changing RRULE definitely invalidates instances.
+                    # if "rrule" in update_dict:
+                    #     logger.warning("Updating RRULE - existing modifications might be invalidated", event_id=event_id)
+                    #     # stmt = delete(ModifiedInstance).where(ModifiedInstance.event_id == event_id)
+                    #     # await session.execute(stmt)
+                    session.add(db_event)
+                    await session.commit()
+                    await session.refresh(db_event)
+                    logger.info("Successfully updated recurring event series (simple fields)", event_id=event_id)
+                else:
+                    logger.info("No changes detected for recurring series update", event_id=event_id)
+
+                return db_event # Return the updated base event
+
+            else: # Handle non-recurring event update (existing logic)
+                logger.debug("Handling update for non-recurring event", event_id=event_id)
+                update_dict = update_data.model_dump(exclude_unset=True)
+
+                # Flag to track if time-related fields are updated
+                time_updated = False
+                new_start_time = db_event.start_time
+                new_end_time = db_event.end_time
+                new_time_zone = db_event.time_zone
+
+                if "time_zone" in update_dict:
+                    new_time_zone = update_dict["time_zone"]
+                    time_updated = True
+                if "start_time" in update_dict:
+                    new_start_time = update_dict["start_time"]
+                    time_updated = True
+                if "end_time" in update_dict:
+                    new_end_time = update_dict["end_time"]
+                    time_updated = True
+
+                # Perform conflict check ONLY if time was updated and resolver exists
+                if time_updated and self.conflict_resolver:
+                    logger.debug("Time fields updated, checking for conflicts", event_id=event_id)
+                    # Create a temporary EventCreate object for conflict checking
+                    # Use existing non-time fields + new time fields
+                    conflict_check_data = EventCreate(
+                        title=update_dict.get("title", db_event.title),
+                        start_time=new_start_time, # Use potentially updated time
+                        end_time=new_end_time,     # Use potentially updated time
+                        time_zone=new_time_zone,   # Use potentially updated timezone
+                        location=update_dict.get("location", db_event.location),
+                        notes=update_dict.get("notes", db_event.notes),
+                        rrule=None, # Non-recurring
+                        # TODO: Handle participant conflicts?
+                    )
+                    conflicts = await self.conflict_resolver.detect_conflicts(conflict_check_data, ignore_event_id=event_id)
+                    if conflicts:
+                        logger.warning(
+                            "Conflict detected during non-recurring event update", event_id=event_id, conflicts=conflicts
+                        )
+                        raise ConflictError(conflicts=conflicts)
+                elif time_updated:
+                    logger.warning("Time fields updated but no conflict resolver available, skipping check.", event_id=event_id)
+
+                # Apply updates if no conflict error was raised
+                updated = False
+                for key, value in update_dict.items():
+                    if hasattr(db_event, key) and getattr(db_event, key) != value:
+                        # Normalize time fields before setting
+                        if key in ["start_time", "end_time"]:
+                            # Use the potentially updated timezone for normalization
+                            normalized_dt = self.date_utils.normalize_to_utc(value, tz_name=new_time_zone)
+                            setattr(db_event, key, normalized_dt.replace(tzinfo=None))
+                        else:
+                            setattr(db_event, key, value)
+                        updated = True
+
+                if updated:
+                    session.add(db_event)
+                    await session.commit()
+                    await session.refresh(db_event)
+                    logger.info("Successfully updated non-recurring event", event_id=event_id)
+                else:
+                    logger.info("No changes detected for non-recurring event update", event_id=event_id)
+
+                return db_event
 
     async def delete_event(self, event_id: uuid.UUID) -> bool:
         """Deletes an event by its ID.

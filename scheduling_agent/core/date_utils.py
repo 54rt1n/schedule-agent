@@ -1,6 +1,6 @@
 """Date and time utility functions."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time, timedelta
 from functools import lru_cache
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -9,6 +9,8 @@ from dateutil.parser import parse as dateutil_parse
 
 from scheduling_agent.db.models import Event, ExcludedDate, ModifiedInstance
 from scheduling_agent.logging_config import get_logger
+
+import dateparser
 
 logger = get_logger(__name__)
 
@@ -123,6 +125,91 @@ class DateUtils:
         except Exception as e:
             logger.exception(f"Failed to parse RRULE string: '{rrule_str}'", error=str(e))
             return None  # Return None or raise an error?
+
+    def parse_nlp_date_range(
+        self,
+        start_date_str: str | None,
+        end_date_str: str | None,
+        default_start: str = "today",
+        default_end: str = "next Sunday",
+    ) -> tuple[datetime, datetime]:
+        """Parses start/end date strings (often from NLP) into an aware UTC date range.
+
+        Applies defaults, adjusts times to cover full days, and handles parsing errors.
+
+        Args:
+            start_date_str: The start date string (e.g., "tomorrow", "2024-05-10").
+            end_date_str: The end date string.
+            default_start: Default string if start_date_str is None or empty.
+            default_end: Default string if end_date_str is None or empty.
+
+        Returns:
+            A tuple containing (range_start_utc, range_end_utc), both aware UTC datetimes.
+        """
+        start_str_to_parse = start_date_str or default_start
+        end_str_to_parse = end_date_str or default_end
+
+        range_start_utc: datetime | None = None
+        range_end_utc: datetime | None = None
+
+        # Use dateparser for flexible string parsing
+        parser_settings = {"RETURN_AS_TIMEZONE_AWARE": True, "TIMEZONE": "UTC"}
+
+        try:
+            # Parse start date string using dateparser
+            start_dt = dateparser.parse(start_str_to_parse, settings=parser_settings)
+            if start_dt:
+                # Set time to beginning of the day
+                start_dt = start_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+                # Ensure it's aware UTC (dateparser should handle this with settings)
+                range_start_utc = self.normalize_to_utc(start_dt)
+
+            # Parse end date string using dateparser
+            end_dt = dateparser.parse(end_str_to_parse, settings=parser_settings)
+            if end_dt:
+                # Set time to end of the day
+                end_dt = end_dt.replace(hour=23, minute=59, second=59, microsecond=999999)
+                # Ensure it's aware UTC
+                range_end_utc = self.normalize_to_utc(end_dt)
+
+            # Handle parsing failures with defaults
+            if range_start_utc is None:
+                logger.warning(
+                    f"Failed to parse start date '{start_str_to_parse}', defaulting to today."
+                )
+                range_start_utc = self.normalize_to_utc(
+                    datetime.combine(datetime.now(UTC).date(), time.min) # Aware UTC start of today
+                )
+            if range_end_utc is None:
+                logger.warning(
+                    f"Failed to parse end date '{end_str_to_parse}', defaulting to 7 days from start."
+                )
+                # Default end is 7 days from the *determined* start date
+                range_end_utc = range_start_utc + timedelta(days=7)
+                # Ensure end time is end of day
+                range_end_utc = range_end_utc.replace(hour=23, minute=59, second=59, microsecond=999999)
+
+            # Ensure start is before end
+            if range_start_utc >= range_end_utc:
+                logger.warning(
+                    f"Parsed start date '{start_str_to_parse}' is on or after end date '{end_str_to_parse}', adjusting end date."
+                )
+                range_end_utc = range_start_utc + timedelta(days=7)
+                range_end_utc = range_end_utc.replace(hour=23, minute=59, second=59, microsecond=999999)
+
+        except Exception as parse_err:
+            # Fallback completely if any unexpected error occurs during parsing
+            logger.exception(
+                f"Unexpected error parsing date range ('{start_str_to_parse}' - '{end_str_to_parse}'), defaulting to next 7 days.",
+                error=parse_err,
+            )
+            range_start_utc = self.normalize_to_utc(
+                 datetime.combine(datetime.now(UTC).date(), time.min)
+            )
+            range_end_utc = range_start_utc + timedelta(days=7)
+            range_end_utc = range_end_utc.replace(hour=23, minute=59, second=59, microsecond=999999)
+
+        return range_start_utc, range_end_utc
 
     def expand_recurrence(
         self,

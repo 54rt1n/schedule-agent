@@ -98,11 +98,20 @@ def mock_conflict_resolver_unit() -> AsyncMock:
 def mock_nlp_processor_unit() -> AsyncMock:
     """Provides a mock NLPProcessor for unit tests."""
     mock = AsyncMock(spec=NLPProcessor)
-    mock.parse_natural_language_query = AsyncMock(
+    # Mock the 'process' method called by the handler
+    mock.process = AsyncMock(
         return_value=LLMSchedulingParseResult(
-            intent="unknown", date_info=LLMDateInfo()
-        )  # Use LLMDateInfo
+            intent="unknown", 
+            date_info=LLMDateInfo(), 
+            filters=LLMFilters() # Add default filters
+        )
     )
+    # Remove the unused mock method
+    # mock.parse_natural_language_query = AsyncMock(
+    #     return_value=LLMSchedulingParseResult(
+    #         intent="unknown", date_info=LLMDateInfo()
+    #     )  # Use LLMDateInfo
+    # )
     # Add mock for date_utils if needed within handler logic related to NLP
     mock.date_utils = MagicMock()
     return mock
@@ -191,12 +200,24 @@ async def test_handle_tasks_send_create_success(
     )
 
     # Assertions
-    # 1. Check TaskManager calls
-    mock_task_manager_unit.create_task.assert_awaited_once_with(params=params)
+    # 1. Check DB and TaskManager calls
+    # For structured create, create_task is NOT called initially
+    mock_task_manager_unit.create_task.assert_not_awaited()
     mock_db_service_unit.create_event.assert_awaited_once()
-    # TODO: Assert specific args for create_event (EventCreate model)
+    # Extract EventCreate object passed to create_event using KWARGS
+    call_kwargs = mock_db_service_unit.create_event.await_args.kwargs
+    assert isinstance(call_kwargs.get('event_data'), EventCreate)
+    assert call_kwargs.get('event_data').title == event_title
+    # Verify complete_task was called with correct args
     mock_task_manager_unit.complete_task.assert_awaited_once()
-    # TODO: Assert specific args for complete_task (message, artifact)
+    complete_args, _ = mock_task_manager_unit.complete_task.await_args
+    assert complete_args[0] == task_id # Check task_id
+    assert isinstance(complete_args[1], Message) # Check message type
+    assert f"Event '{event_title}' created successfully." in complete_args[1].parts[0].text
+    assert isinstance(complete_args[2], Artifact) # Check artifact type
+    assert complete_args[2].name == "created_event"
+    # Use model_dump(mode='json') to match the serialization in the handler
+    assert complete_args[2].parts[0].data == mock_created_event.model_dump(mode='json')
 
     # 2. Check the returned Task object
     assert isinstance(returned_task, Task)
@@ -245,7 +266,8 @@ async def test_handle_tasks_send_create_conflict(
                 type="data",
                 data={
                     "message": str(conflict_error),
-                    "conflicts": [conflicting_event.model_dump()],
+                    # Use model_dump(mode='json') to match the serialization in the handler
+                    "conflicts": [conflicting_event.model_dump(mode='json')],
                     "alternatives": mock_alternatives,
                 },
             )
@@ -269,19 +291,25 @@ async def test_handle_tasks_send_create_conflict(
     )
 
     # Assertions
-    mock_task_manager_unit.create_task.assert_awaited_once_with(params=params)
+    # 1. Check DB and TaskManager calls
+    # For structured create, create_task is NOT called initially
+    mock_task_manager_unit.create_task.assert_not_awaited()
     mock_db_service_unit.create_event.assert_awaited_once()
-    # Assert Conflict Resolver was called correctly
+    # Verify ConflictResolver was called after ConflictError
     mock_conflict_resolver_unit.generate_alternative_times.assert_awaited_once_with(
         event_create_data, conflict_error.conflicts
     )
-    # Assert require_input_task was called
+    # Verify require_input_task was called with correct args
     mock_task_manager_unit.require_input_task.assert_awaited_once()
-    # TODO: Assert specific args for require_input_task (message, artifact)
-    mock_task_manager_unit.complete_task.assert_not_called()
-    mock_task_manager_unit.fail_task.assert_not_called()
+    require_input_args, _ = mock_task_manager_unit.require_input_task.await_args
+    assert require_input_args[0] == task_id # Check task_id
+    assert isinstance(require_input_args[1], Message) # Check message
+    assert "Event creation failed due to conflicts" in require_input_args[1].parts[0].text
+    assert require_input_args[2] == expected_conflict_artifact # Check artifact
+    # Verify complete_task was NOT called
+    mock_task_manager_unit.complete_task.assert_not_awaited()
 
-    # Assert the returned task is the one from require_input_task
+    # 2. Check the returned Task object
     assert isinstance(returned_task, Task)
     assert returned_task.status.state == TaskState.INPUT_REQUIRED
     assert returned_task.model_dump() == expected_final_input_task.model_dump()
@@ -306,9 +334,9 @@ async def test_handle_tasks_send_query_success(
     mock_nlp_result = LLMSchedulingParseResult(
         intent="query_events",
         date_info=LLMDateInfo(start_date="today", end_date="today"),  # Use LLMDateInfo
-        # TODO: Add entities if the handler logic requires them
+        entities=None,  # Explicitly set entities to None
     )
-    mock_nlp_processor_unit.parse_natural_language_query.return_value = mock_nlp_result
+    mock_nlp_processor_unit.process.return_value = mock_nlp_result
 
     # Mock DB result
     mock_event = Event(
@@ -339,9 +367,9 @@ async def test_handle_tasks_send_query_success(
     )
 
     # Assertions (Check calls AFTER the expected success)
-    mock_task_manager_unit.create_task.assert_awaited_once_with(params=params)
+    # mock_task_manager_unit.create_task.assert_awaited_once_with(params=params) # REMOVED: create_task is not called in this path
     # Assert NLP was called
-    mock_nlp_processor_unit.parse_natural_language_query.assert_awaited_once_with(query)
+    mock_nlp_processor_unit.process.assert_awaited_once_with(query)
     # Assert DB query was called (check args later if needed)
     mock_db_service_unit.query_events.assert_awaited_once()
     # TODO: Check args for query_events based on validated EventQuery
@@ -494,9 +522,10 @@ async def test_handle_tasks_send_export_success(
     mock_nlp_result = LLMSchedulingParseResult(
         intent="export_calendar",
         date_info=LLMDateInfo(),  # Placeholder date info
-        filters={"format": "ics"},  # Specify format
+        filters=LLMFilters(format="ics"),  # Specify format in filters
+        entities=None,  # Explicitly set entities to None
     )
-    mock_nlp_processor_unit.parse_natural_language_query.return_value = mock_nlp_result
+    mock_nlp_processor_unit.process.return_value = mock_nlp_result
 
     # Mock DB result
     mock_events_list = [
@@ -568,8 +597,8 @@ async def test_handle_tasks_send_export_success(
     assert file_part.file.bytes == expected_base64_bytes
 
     # Verify mock calls
-    mock_task_manager_unit.create_task.assert_awaited_once_with(params=params)
-    mock_nlp_processor_unit.parse_natural_language_query.assert_awaited_once_with(query)
+    # mock_task_manager_unit.create_task.assert_awaited_once_with(params=params) # REMOVED: create_task is not called in this path
+    mock_nlp_processor_unit.process.assert_awaited_once_with(query)
     mock_db_service_unit.get_events_in_range.assert_awaited_once()
     # Ensure the correct exporter from the mock dict was used
     mock_ical_exporter_unit.export.assert_called_once_with(mock_events_list)
@@ -599,8 +628,9 @@ async def test_handle_tasks_send_export_unsupported_format(
         intent="export_calendar",
         date_info=LLMDateInfo(),
         filters=mock_filters,  # Use the LLMFilters instance
+        entities=None,  # Explicitly set entities to None
     )
-    mock_nlp_processor_unit.parse_natural_language_query.return_value = mock_nlp_result
+    mock_nlp_processor_unit.process.return_value = mock_nlp_result
 
     # Action & Assert: Expect InvalidParamsError
     with pytest.raises(InvalidParamsError, match="Unsupported export format requested: pdf"):
@@ -616,8 +646,8 @@ async def test_handle_tasks_send_export_unsupported_format(
         )
 
     # Verify relevant mocks were called/not called
-    mock_task_manager_unit.create_task.assert_awaited_once_with(params=params)
-    mock_nlp_processor_unit.parse_natural_language_query.assert_awaited_once_with(query)
+    # mock_task_manager_unit.create_task.assert_awaited_once_with(params=params) # REMOVED: create_task is not called in this path
+    mock_nlp_processor_unit.process.assert_awaited_once_with(query)
     mock_db_service_unit.get_events_in_range.assert_not_called()
     mock_task_manager_unit.complete_task.assert_not_called()
     mock_task_manager_unit.fail_task.assert_not_called()

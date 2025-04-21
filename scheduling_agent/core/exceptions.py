@@ -34,3 +34,16 @@ class TaskNotFoundError(CoreLogicError):
         message = f"Task with ID '{task_id}' not found."
         super().__init__(message)
         self.task_id = task_id
+
+
+class DatabaseError(Exception):
+    """Base class for database-related errors."""
+
+
+
+class EventNotFoundError(DatabaseError):
+    """Raised when a specific event is not found."""
+
+    def __init__(self, event_id: str):
+        self.event_id = event_id
+        super().__init__(f"Event with ID '{event_id}' not found.")

@@ -23,17 +23,15 @@ logger = get_logger(__name__)  # Initialize logger for this module
 def get_db_service(request: Request) -> DatabaseService:
     db_service = getattr(request.app.state, "db_service", None)
     if db_service is None:
+        # This should ideally not happen if lifespan ran correctly
         logger.error("DatabaseService not found in app state!")
         raise RuntimeError("DatabaseService not initialized.")
     return db_service
 
 
-def get_date_utils(request: Request) -> DateUtils:
-    date_utils = getattr(request.app.state, "date_utils", None)
-    if date_utils is None:
-        logger.error("DateUtils not found in app state!")
-        raise RuntimeError("DateUtils not initialized.")
-    return date_utils
+def get_date_utils() -> DateUtils:
+    """Provides an instance of DateUtils."""
+    return DateUtils()
 
 
 def get_llm_provider(request: Request) -> LLMProvider:
@@ -63,7 +61,7 @@ def get_conflict_resolver(request: Request) -> ConflictResolver:
 # Exporters (Phase 4, Task 2)
 def get_exporters(request: Request) -> dict[str, CalendarExporter]:
     """Dependency function to get the available exporters."""
-    date_utils = get_date_utils(request)  # Reuse date utils
+    date_utils = get_date_utils()  # Reuse date utils
     # TODO: Eventually configure which exporters are active via settings
     exporters = getattr(request.app.state, "exporters", None)
     if exporters is None:
@@ -80,6 +78,6 @@ def get_task_manager(request: Request) -> SchedulingTaskManager:
     """Dependency function to get the TaskManager instance from app state."""
     task_manager = getattr(request.app.state, "task_manager", None)
     if task_manager is None:
-        logger.error("TaskManager not found in app state!")
-        raise RuntimeError("TaskManager not initialized.")
+        logger.error("SchedulingTaskManager not found in app state!")
+        raise RuntimeError("SchedulingTaskManager not initialized.")
     return task_manager

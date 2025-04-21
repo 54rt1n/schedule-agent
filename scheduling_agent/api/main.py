@@ -7,9 +7,14 @@ from fastapi.exceptions import RequestValidationError  # Import for handling 422
 from fastapi.responses import JSONResponse
 
 from scheduling_agent.a2a.types import (
+    BaseA2AError,
     InternalError,
+    InvalidParamsError,
     InvalidRequestError,
+    MethodNotFoundError,
     ParseError,
+    TaskNotCancelableError,
+    TaskNotFoundError,
 )
 from scheduling_agent.a2a.types import (
     JSONRPCResponse as A2AJSONRPCResponse,  # Avoid naming conflict with fastapi.responses.JSONResponse
@@ -18,7 +23,7 @@ from scheduling_agent.api.middleware.auth import APIKeyAuthMiddleware
 from scheduling_agent.api.routes import rpc, well_known
 from scheduling_agent.core.conflict_resolver import ConflictResolver
 from scheduling_agent.core.date_utils import DateUtils
-from scheduling_agent.core.exceptions import NLPError
+from scheduling_agent.core.exceptions import NLPError, DatabaseError
 from scheduling_agent.core.exporters.ical_exporter import ICalExporter
 from scheduling_agent.core.exporters.orgmode_exporter import OrgModeExporter
 from scheduling_agent.core.llm_provider import LLMProvider
@@ -27,8 +32,6 @@ from scheduling_agent.core.nlp_processor import NLPProcessor
 # Import db engine/session factory creation functions
 from scheduling_agent.db.database import create_db_engine, create_session_factory
 
-# Import actual exceptions directly
-from scheduling_agent.db.exceptions import DatabaseError
 from scheduling_agent.db.service import DatabaseService
 from scheduling_agent.logging_config import get_logger, setup_logging
 from scheduling_agent.settings import settings
@@ -155,6 +158,30 @@ app.add_middleware(APIKeyAuthMiddleware)
 
 # --- Centralized Error Handlers (Phase 3, Task 2) ---
 
+# NEW Handler for A2A Errors raised within route logic
+# Register the handler for each specific A2A error type
+@app.exception_handler(BaseA2AError)
+async def a2a_exception_handler(request: Request, exc: Exception):
+    """Handles known A2AErrors raised from within route handlers."""
+    logger.warning(
+        f"Caught known A2A exception: {type(exc).__name__}",
+        exc_info=exc, # Log the full exception details at warning level
+        request_url=request.url.path,
+        error_code=exc.code,
+        error_message=exc.message,
+    )
+    # Attempt to get request_id, but don't fail if body is consumed
+    request_id, _ = await _get_request_details(request)
+
+    # Use the error's built-in method to get the JSON-RPC error object
+    rpc_error = exc.as_jsonrpc_error()
+
+    return JSONResponse(
+        status_code=200, # JSON-RPC uses 200 OK for errors
+        content=A2AJSONRPCResponse(id=request_id, error=rpc_error).model_dump(
+            exclude_none=True
+        ),
+    )
 
 @app.exception_handler(DatabaseError)
 async def database_exception_handler(request: Request, exc: DatabaseError):
@@ -164,9 +191,11 @@ async def database_exception_handler(request: Request, exc: DatabaseError):
     # Map to A2A InternalError
     error_data = {"taskId": task_id, "details": str(exc)}
     a2a_error = InternalError(message="An internal database error occurred.", data=error_data)
+    # Use the new A2A handler's logic for response generation
+    rpc_error = a2a_error.as_jsonrpc_error()
     return JSONResponse(
-        status_code=200,  # JSON-RPC errors usually use 200 OK
-        content=A2AJSONRPCResponse(id=request_id, error=a2a_error.as_jsonrpc_error()).model_dump(
+        status_code=200,
+        content=A2AJSONRPCResponse(id=request_id, error=rpc_error).model_dump(
             exclude_none=True
         ),
     )
@@ -180,9 +209,11 @@ async def nlp_exception_handler(request: Request, exc: NLPError):
     # Map to A2A InternalError
     error_data = {"taskId": task_id, "details": str(exc)}
     a2a_error = InternalError(message="An internal NLP processing error occurred.", data=error_data)
+    # Use the new A2A handler's logic for response generation
+    rpc_error = a2a_error.as_jsonrpc_error()
     return JSONResponse(
         status_code=200,
-        content=A2AJSONRPCResponse(id=request_id, error=a2a_error.as_jsonrpc_error()).model_dump(
+        content=A2AJSONRPCResponse(id=request_id, error=rpc_error).model_dump(
             exclude_none=True
         ),
     )
@@ -268,57 +299,29 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 # Generic fallback handler
 @app.exception_handler(Exception)
 async def generic_exception_handler(request: Request, exc: Exception):
-    """Catches any unhandled exception and returns a standard A2A InternalError."""
-    # Log the original exception first
+    """Handles any other unexpected exceptions not caught by specific handlers."""
+    # Log with high severity as this is unexpected
     logger.exception(
-        "Unhandled generic Exception caught by handler",  # Restored original log message
-        exc_info=exc,  # Let logger format the traceback
-        request_url=request.url.path,
+        "Unhandled generic Exception caught by handler", exc_info=exc, request_url=request.url.path
     )
+    # Attempt to get request_id, but don't fail if body is consumed
+    request_id, params = await _get_request_details(request)
+    task_id = params.get("id") if isinstance(params, dict) else None
 
-    # Restore original logic with inner try/except
-    request_id = None
-    task_id = None
-    error_details = f"Unhandled exception of type {type(exc).__name__}: {exc!s}"
+    # Create a standard A2A InternalError response
+    # Avoid exposing raw exception details unless necessary/configured
+    error_data = {"taskId": task_id, "details": "An unexpected server error occurred."}
+    a2a_error = InternalError(message="Internal server error", data=error_data)
+    rpc_error = a2a_error.as_jsonrpc_error()
 
-    try:
-        # Best effort to get request details for context, but don't let this fail the handler
-        request_id, params = await _get_request_details(request)
-        if isinstance(params, dict):
-            task_id = params.get("id")  # Use "id" from params for task_id
-
-        # Prepare the A2A error structure
-        error_data = {"taskId": task_id, "details": error_details}
-        a2a_error = InternalError(
-            message="An unexpected internal server error occurred.", data=error_data
-        )
-        response_content = A2AJSONRPCResponse(
-            id=request_id, error=a2a_error.as_jsonrpc_error()
-        ).model_dump(exclude_none=True)
-
-    except Exception as handler_exc:
-        # If getting details or formatting response fails, log *that* error
-        # and return a very generic InternalError
-        logger.exception(
-            "Error occurred *within* the generic exception handler itself",
-            handler_error=str(handler_exc),
-            original_exception=error_details,
-            request_url=request.url.path,
-            exc_info=handler_exc,
-        )
-        fallback_error = InternalError(
-            message="An unexpected internal server error occurred.", data={"details": error_details}
-        )
-        response_content = A2AJSONRPCResponse(
-            id=None, error=fallback_error.as_jsonrpc_error()
-        ).model_dump(exclude_none=True)
-        # Ensure request_id is None if we failed to get it
-        request_id = None
-
-    # Always return a JSONResponse, even if generating the content failed above
     return JSONResponse(
-        status_code=200,  # JSON-RPC errors usually use 200 OK
-        content=response_content,
+        status_code=200, # JSON-RPC still uses 200 OK
+        content=A2AJSONRPCResponse(id=request_id, error=rpc_error).model_dump(
+            exclude_none=True
+        ),
+        # Potentially set status_code=500 if you want to distinguish transport errors
+        # from application errors, but A2A spec typically uses 200 for RPC errors.
+        # status_code=500,
     )
 
 

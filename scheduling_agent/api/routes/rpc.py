@@ -29,18 +29,21 @@ from scheduling_agent.a2a.types import (
     JSONRPCResponse,
     Message,
     MethodNotFoundError,
+    ParseError, # Add ParseError
     Part,
     Task,
     TaskGetParams,
     TaskNotCancelableError,  # Add TaskNotCancelableError
     TaskNotFoundError,  # Added TaskNotFoundError
     TaskSendParams,
+    StructuredUpdatePayload,
 )
 from scheduling_agent.core.conflict_resolver import ConflictResolver  # Import ConflictResolver
 from scheduling_agent.core.date_utils import DateUtils  # Import DateUtils
 from scheduling_agent.core.exceptions import (
     ConflictError,
     NLPError,  # Added NLPError
+    DatabaseError # Added DatabaseError
 )
 from scheduling_agent.core.exporters.base import (
     CalendarExporter,
@@ -50,275 +53,30 @@ from scheduling_agent.core.schemas import LLMSchedulingParseResult
 
 # Import the DB table model Event from models and the DTO EventCreate from schemas
 from scheduling_agent.db.models import Event
-from scheduling_agent.db.schemas import EventCreate
+from scheduling_agent.db.schemas import EventCreate, EventUpdate
 
 # Import db models/services for logic
 from scheduling_agent.db.service import DatabaseService
 from scheduling_agent.logging_config import get_logger
 from scheduling_agent.a2a.task_manager import SchedulingTaskManager
 
+# Consolidated handler import
+from scheduling_agent import handlers
+
+# Import StructuredUpdatePayload (or define it here if not moved)
+# Define the structured payload here for now, can move later
+import uuid
+
+# Add ConflictError import
+from scheduling_agent.core.exceptions import ConflictError, DatabaseError
+
 logger = get_logger(__name__)
 router = APIRouter()
 
-# --- Helper Functions for handle_tasks_send Logic ---
+# --- Helper functions removed, logic moved to handlers --- 
 
-
-async def _handle_send_structured_data(
-    task_id: str,
-    input_data: dict,
-    task_manager: SchedulingTaskManager,
-    db_service: DatabaseService,
-    conflict_resolver: ConflictResolver,
-    # Removed unused date_utils dependency here
-) -> Task:
-    """Handles the logic path for structured data input (create event)."""
-    # Logic for handling structured data (Create Event Path)
-    if "title" in input_data and ("start_time" in input_data or "startTime" in input_data):
-        try:
-            # Validate input data against EventCreate model
-            event_create_data = EventCreate.model_validate(input_data)
-            # Call DB service to create event
-            created_event = await db_service.create_event(event_data=event_create_data)
-
-            # Prepare success message and artifact
-            result_message = f"Event '{created_event.title}' created successfully."
-            agent_message = Message(role="agent", parts=[Part(type="text", text=result_message)])
-            artifact = Artifact(
-                name="created_event", parts=[Part(type="data", data=created_event.model_dump())]
-            )
-
-            # Update task state via TaskManager
-            final_task = await task_manager.complete_task(task_id, agent_message, artifact)
-            return final_task
-
-        except ConflictError as ce:
-            # --- Conflict Handling Path --- #
-            logger.warning(
-                "Conflict detected during event creation", task_id=task_id, conflicts=ce.conflicts
-            )
-            try:
-                # Validate input data again (needed for generate_alternative_times)
-                event_create_data_for_conflict = EventCreate.model_validate(input_data)
-                alternatives = await conflict_resolver.generate_alternative_times(
-                    event_create_data_for_conflict, ce.conflicts
-                )
-                conflict_info = {
-                    "message": str(ce),
-                    "conflicts": [
-                        c["event"].model_dump()
-                        for c in ce.conflicts
-                        if isinstance(c.get("event"), Event)
-                    ],
-                    "alternatives": alternatives,
-                }
-                artifact = Artifact(
-                    name="conflict_info", parts=[Part(type="data", data=conflict_info)]
-                )
-                result_message = "Event creation failed due to conflicts. Please provide an alternative time or confirm override."
-                agent_message = Message(
-                    role="agent", parts=[Part(type="text", text=result_message)]
-                )
-                # Update task state via TaskManager
-                final_task = await task_manager.require_input_task(task_id, agent_message, artifact)
-                return final_task
-            except Exception as alt_err:
-                logger.exception(
-                    "Failed to generate alternatives after conflict", task_id=task_id, error=alt_err
-                )
-                result_message = f"Event creation failed due to conflicts, and generating alternatives also failed: {alt_err}"
-                # Let the main handler catch and convert to InternalError
-                raise InternalError(message=result_message) from alt_err
-
-        except ValidationError as ve:
-            # Re-raise as InvalidParamsError for the main handler
-            logger.exception(
-                "Invalid event data provided", task_id=task_id, validation_error=ve.errors()
-            )
-            raise InvalidParamsError(
-                message="Invalid data provided for event creation.", data=ve.errors()
-            ) from ve
-
-    else:
-        # Structured data didn't match create event criteria
-        logger.warning(
-            "Could not determine action from structured data", task_id=task_id, data=input_data
-        )
-        # Fail task directly? Or raise error?
-        # Let's raise InvalidParamsError for consistency
-        await task_manager.fail_task(
-            task_id,
-            Message(
-                role="agent",
-                parts=[Part(type="text", text="Could not determine action from structured data.")],
-            ),
-        )  # Keep fail for now
-        raise InvalidParamsError(message="Could not determine action from structured data.")
-
-
-async def _handle_nlp_intent_query(
-    task_id: str,
-    nlp_result: LLMSchedulingParseResult,
-    task_manager: SchedulingTaskManager,
-    db_service: DatabaseService,
-    # Removed unused dependencies (conflict_resolver, exporters, date_utils)
-) -> Task:
-    """Handles the query_events intent from NLP result."""
-    entities = nlp_result.filters  # Assuming filters contain query params
-    try:
-        # Map NLP entities to EventQuery fields
-        query_data = {
-            "start_time": entities.start_time if hasattr(entities, "start_time") else None,
-            "end_time": entities.end_time if hasattr(entities, "end_time") else None,
-            "title_contains": entities.title if hasattr(entities, "title") else None,
-        }
-        query_data = {k: v for k, v in query_data.items() if v is not None}
-        event_query = EventQuery.model_validate(query_data)
-
-        queried_events = await db_service.query_events(query=event_query)
-
-        if queried_events:
-            result_message = f"Found {len(queried_events)} event(s) matching your query."
-            events_data = [event.model_dump() for event in queried_events]
-            artifact = Artifact(name="queried_events", parts=[Part(type="data", data=events_data)])
-        else:
-            result_message = "No events found matching your query."
-            artifact = None
-
-        agent_message = Message(role="agent", parts=[Part(type="text", text=result_message)])
-        final_task = await task_manager.complete_task(task_id, agent_message, artifact)
-        return final_task
-
-    except ValidationError as ve:
-        logger.exception(
-            "Invalid query parameters extracted from NLP",
-            task_id=task_id,
-            validation_error=ve.errors(),
-            extracted_entities=entities,
-        )
-        clarification_msg = f"I understood you wanted to query events, but I couldn't understand the details. Could you please rephrase your query? (Details: {ve.errors()})"
-        agent_message = Message(role="agent", parts=[Part(type="text", text=clarification_msg)])
-        final_task = await task_manager.require_input_task(task_id, agent_message)
-        return final_task
-
-
-async def _handle_nlp_intent_export(
-    task_id: str,
-    nlp_result: LLMSchedulingParseResult,
-    task_manager: SchedulingTaskManager,
-    db_service: DatabaseService,
-    exporters: dict[str, CalendarExporter],
-    date_utils: DateUtils,
-    # Removed unused dependency conflict_resolver
-) -> Task:
-    """Handles the export_calendar intent from NLP result."""
-    entities = nlp_result.filters  # Assuming filters contain export params
-    logger.info("Handling export_calendar intent", task_id=task_id, entities=entities)
-    try:
-        # 1. Parse format and date range
-        export_format = "ics"  # Default
-        if entities and hasattr(entities, "format") and entities.format:
-            export_format = entities.format.lower()
-
-        range_start_utc: datetime = None
-        range_end_utc: datetime = None
-        start_date_str = getattr(nlp_result.date_info, "start_date", None) or "today"
-        end_date_str = getattr(nlp_result.date_info, "end_date", None) or "next Sunday"
-
-        try:
-            start_dt = dateparser.parse(
-                start_date_str, settings={"RETURN_AS_TIMEZONE_AWARE": True, "TIMEZONE": "UTC"}
-            )
-            if start_dt:
-                start_dt = start_dt.replace(hour=0, minute=0, second=0, microsecond=0)
-                range_start_utc = date_utils.normalize_to_utc(start_dt)
-            end_dt = dateparser.parse(
-                end_date_str, settings={"RETURN_AS_TIMEZONE_AWARE": True, "TIMEZONE": "UTC"}
-            )
-            if end_dt:
-                end_dt = end_dt.replace(hour=23, minute=59, second=59, microsecond=999999)
-                range_end_utc = date_utils.normalize_to_utc(end_dt)
-
-            if range_start_utc is None:
-                logger.warning(
-                    "Failed to parse start date for export, defaulting to today.",
-                    task_id=task_id,
-                    input=start_date_str,
-                )
-                range_start_utc = date_utils.normalize_to_utc(
-                    datetime.combine(datetime.now(UTC).date(), time.min)
-                )
-            if range_end_utc is None:
-                logger.warning(
-                    "Failed to parse end date for export, defaulting to 7 days from start.",
-                    task_id=task_id,
-                    input=end_date_str,
-                )
-                range_end_utc = range_start_utc + timedelta(days=7)
-            if range_start_utc >= range_end_utc:
-                logger.warning(
-                    "Parsed start date is after end date, adjusting end date.",
-                    task_id=task_id,
-                    start=range_start_utc,
-                    end=range_end_utc,
-                )
-                range_end_utc = range_start_utc + timedelta(days=7)
-        except Exception as parse_err:
-            logger.exception(
-                "Error parsing date range for export, defaulting to next 7 days.",
-                task_id=task_id,
-                error=parse_err,
-            )
-            range_start_utc = date_utils.normalize_to_utc(
-                datetime.combine(datetime.now(UTC).date(), time.min)
-            )
-            range_end_utc = range_start_utc + timedelta(days=7)
-
-        logger.info(
-            "Determined export date range (UTC)",
-            task_id=task_id,
-            start=range_start_utc,
-            end=range_end_utc,
-        )
-
-        # 2. Get the correct exporter
-        exporter = exporters.get(export_format)
-        if not exporter:
-            # This is an invalid parameter from the user/NLP, handle it here
-            raise InvalidParamsError(f"Unsupported export format requested: {export_format}")
-
-        # 3. Query events from DB
-        # Let DatabaseError propagate if it occurs here
-        events_to_export = await db_service.get_events_in_range(
-            start=range_start_utc, end=range_end_utc
-        )
-
-        # 4. Export events
-        # Let ExporterError or other Exceptions propagate if they occur here
-        exported_data = exporter.export(events_to_export)
-        mime_type = exporter.get_mime_type()
-        file_name = f"calendar.{export_format}"
-
-        # 5. Base64 encode the result
-        encoded_bytes = base64.b64encode(exported_data.encode("utf-8")).decode("utf-8")
-
-        # 6. Create Artifact
-        file_content = FileContent(name=file_name, mimeType=mime_type, bytes=encoded_bytes)
-        artifact = Artifact(name=file_name, parts=[Part(type="file", file=file_content)])
-
-        # 7. Complete task
-        result_message = f"Calendar exported successfully as {file_name}."
-        agent_message = Message(role="agent", parts=[Part(type="text", text=result_message)])
-        final_task = await task_manager.complete_task(task_id, agent_message, artifact)
-        logger.info("Export task completed successfully", task_id=task_id)
-        return final_task
-
-    except InvalidParamsError as ipe:
-        # Catch InvalidParamsError specifically to let it propagate clearly
-        logger.warning(f"InvalidParamsError during export: {ipe.message}", task_id=task_id)
-        raise
-
-
-async def _handle_send_nlp_input(
+# --- Main NLP Dispatcher ---
+async def _dispatch_nlp_request(
     task_id: str,
     input_text: str,
     task_manager: SchedulingTaskManager,
@@ -326,70 +84,89 @@ async def _handle_send_nlp_input(
     nlp_processor: NLPProcessor,
     exporters: dict[str, CalendarExporter],
     date_utils: DateUtils,
-    # Removed unused dependency conflict_resolver
+    conflict_resolver: ConflictResolver,
 ) -> Task:
-    """Handles the logic path for NLP text input."""
-    logger.info("Processing text input via NLP", task_id=task_id, text=input_text)
+    """Processes NLP input, determines intent, and dispatches to the appropriate handler."""
+    logger.info(
+        "Processing NLP input", task_id=task_id, input_text=input_text[:100] # Log truncated text
+    )
     try:
-        # Let NLPError propagate from here
-        nlp_result = await nlp_processor.parse_natural_language_query(input_text)
-        intent = nlp_result.intent
+        # 1. Process text with NLP Processor
+        nlp_result = await nlp_processor.process(input_text)
         logger.info(
             "NLP processing result",
             task_id=task_id,
-            intent=intent,
-            nlp_result=nlp_result.model_dump(),
+            intent=nlp_result.intent,
+            filters=nlp_result.filters,
+            date_info=nlp_result.date_info,
         )
 
-        if intent == "query_events":
-            # Let DatabaseError propagate from here
-            return await _handle_nlp_intent_query(
-                task_id=task_id,
-                nlp_result=nlp_result,
-                task_manager=task_manager,
-                db_service=db_service,
+        # 2. Route based on intent
+        intent = nlp_result.intent
+
+        if intent == "create_event":
+            return await handlers.handle_nlp_create(
+                task_id, nlp_result, task_manager
             )
 
-        if intent == "export_calendar":
-            # Let DatabaseError, ExporterError, Exception propagate from here
-            # Also lets InvalidParamsError propagate if format is wrong
-            return await _handle_nlp_intent_export(
-                task_id=task_id,
-                nlp_result=nlp_result,
-                task_manager=task_manager,
-                db_service=db_service,
-                exporters=exporters,
-                date_utils=date_utils,
+        elif intent == "query_events":
+            return await handlers.handle_nlp_query(
+                task_id, nlp_result, task_manager, db_service
             )
 
-        # TODO: Add handlers for other intents (e.g., create_event, update_event, delete_event)
-        if intent and intent != "unknown":
+        elif intent == "export_calendar":
+            return await handlers.handle_nlp_export(
+                task_id, nlp_result, task_manager, db_service, exporters, date_utils
+            )
+
+        elif intent == "update_event":
+            return await handlers.handle_nlp_update(
+                task_id, nlp_result, task_manager, db_service, date_utils, conflict_resolver
+            )
+
+        elif intent == "delete_event":
+            return await handlers.handle_nlp_delete(
+                 task_id, nlp_result, task_manager
+            )
+
+        else:  # Includes "unknown" or other intents
             logger.warning("Unhandled NLP intent", task_id=task_id, intent=intent)
-            unhandled_msg = f"I understood the intent '{intent}', but I cannot handle that yet."
-            agent_message = Message(role="agent", parts=[Part(type="text", text=unhandled_msg)])
-            return await task_manager.fail_task(task_id, agent_message)
+            agent_message = Message(
+                role="agent",
+                parts=[
+                    Part(
+                        type="text",
+                        text="I wasn't sure what you wanted to do. Could you please rephrase your request?",
+                    )
+                ],
+            )
+            return await task_manager.require_input_task(task_id, agent_message)
 
-        # Intent not detected or unknown
-        logger.warning(
-            "Could not determine intent from text or intent is unknown",
-            task_id=task_id,
-            text=input_text,
-            intent=intent,
+    except NLPError as nlp_err:
+        logger.error("NLP processing failed", task_id=task_id, error=str(nlp_err))
+        agent_message = Message(
+            role="agent",
+            parts=[
+                Part(
+                    type="text",
+                    text=f"I had trouble understanding your request: {nlp_err}",
+                )
+            ],
         )
-        clarification_msg = (
-            "I wasn't sure what you wanted to do. Could you please rephrase your request?"
-        )
-        agent_message = Message(role="agent", parts=[Part(type="text", text=clarification_msg)])
+        # Return INPUT_REQUIRED state according to spec/tests
         return await task_manager.require_input_task(task_id, agent_message)
 
-    except InvalidParamsError as ipe:
-        # Still catch InvalidParamsError specifically if needed for direct handling/logging
-        logger.warning(
-            "InvalidParamsError caught in NLP handler, re-raising.",
-            task_id=task_id,
-            error_message=ipe.message,
-        )
-        raise
+    except (InternalError, InvalidParamsError, TaskNotFoundError, TaskNotCancelableError, DatabaseError) as a2a_err:
+        # Re-raise known A2A/DB errors directly if they bubble up from intent handlers
+        logger.warning(f"Propagating known error from NLP handler: {type(a2a_err).__name__}", task_id=task_id)
+        raise a2a_err
+    except Exception as e:
+        # Catch any other unexpected exceptions from intent handlers or NLP processing
+        logger.exception("Unexpected error dispatching NLP request", task_id=task_id, error=str(e))
+        # Wrap in a generic InternalError
+        raise InternalError(
+            message="An unexpected error occurred processing your NLP request."
+        ) from e
 
 
 # --- Main Handler ---
@@ -404,64 +181,94 @@ async def handle_tasks_send(
     exporters: dict[str, CalendarExporter] = Depends(get_exporters),
     date_utils: DateUtils = Depends(get_date_utils),
 ) -> Task:
-    """Handles the core logic for the tasks/send method by delegating to helpers."""
-    logger.info("handle_tasks_send called", task_id=params.id)
+    """Handles the 'tasks/send' JSON-RPC method.
+    Routes based on intent and data type (structured vs. NLP)."""
     task_id = params.id
-    initial_message = params.message
+    message = params.message
+    # --- Get Intent and Structure Hint ---
+    intent = getattr(params, 'intent', None) # Get intent if provided
+    is_structured = getattr(params, 'is_structured', False) # Get hint if provided
 
-    # 1. Ensure initial task entry is created
-    try:
-        await task_manager.create_task(params=params)
-        logger.debug("Initial task entry created successfully", task_id=task_id)
-    except Exception as e:
-        logger.exception("Failed to create initial task entry", task_id=task_id, error=e)
-        # Re-raise as InternalError for the main RPC handler to catch
-        raise InternalError(message=f"Failed to initialize task: {e}") from e
-
-    # 2. Determine input type and delegate to helpers
-    input_text = next(
-        (part.text for part in initial_message.parts if part.type == "text" and part.text), None
+    logger.info(
+        "Received tasks/send request",
+        task_id=task_id,
+        intent=intent,
+        is_structured=is_structured,
+        message_role=message.role,
+        num_parts=len(message.parts)
     )
-    input_data = next((part.data for part in initial_message.parts if part.type == "data"), None)
 
-    try:
-        if input_data and isinstance(input_data, dict):
-            logger.debug("Handling structured data input", task_id=task_id)
-            return await _handle_send_structured_data(
-                task_id=task_id,
-                input_data=input_data,
-                task_manager=task_manager,
-                db_service=db_service,
-                conflict_resolver=conflict_resolver,
-            )
-        if input_text:
-            logger.debug("Handling text input via NLP", task_id=task_id)
-            return await _handle_send_nlp_input(
-                task_id=task_id,
-                input_text=input_text,
-                task_manager=task_manager,
-                db_service=db_service,
-                nlp_processor=nlp_processor,
-                exporters=exporters,
-                date_utils=date_utils,
-            )
-        logger.warning("Unsupported input type in tasks/send", task_id=task_id)
-        await task_manager.fail_task(
-            task_id,
-            Message(role="agent", parts=[Part(type="text", text="Unsupported input type.")]),
-        )
-        # Raise InvalidParamsError to be caught by the main handler
-        raise InvalidParamsError(
-            message="Unsupported input type provided. Must include text or data part."
-        )
+    if not message or not message.parts:
+        raise InvalidParamsError(message="Message with parts is required for tasks/send.")
 
-    # Catch A2A errors raised by helpers and let them propagate to the main handler
-    except (InvalidParamsError, InternalError, NLPError) as e:
-        logger.info(
-            f"A2A Exception caught in handle_tasks_send, propagating: {type(e).__name__}",
-            task_id=task_id,
-        )
-        raise
+    # --- Intent-Based Routing ---
+    if intent == "update_event":
+        logger.debug("Routing to update_event handler", task_id=task_id)
+        # 1. Ensure task exists for update
+        existing_task = await task_manager.get_task(task_id)
+        if not existing_task:
+            # If the task doesn't exist, we cannot update it. Fail immediately.
+            # This prevents the creation logic from running for an update intent.
+            logger.warning("Task not found for update_event intent", task_id=task_id)
+            # Raising TaskNotFoundError will be caught by the main handler
+            raise TaskNotFoundError(f"Task {task_id} not found, cannot process update.")
+
+        # 2. Determine if structured or NLP update
+        # Use explicit flag first, then check part type as fallback
+        if is_structured or (message.parts[0].type == "data"):
+            if message.parts[0].type != "data" or not message.parts[0].data:
+                 raise InvalidParamsError("Structured update requires data in the first message part.")
+            # Call structured update helper
+            return await handlers.handle_structured_update(
+                task_id, message.parts[0].data, task_manager, db_service, conflict_resolver
+            )
+        elif message.parts[0].type == "text":
+             # Route to NLP handler (which needs update_event logic added later)
+             logger.info("Routing update_event to NLP handler", task_id=task_id)
+             return await _dispatch_nlp_request(
+                 task_id, message.parts[0].text, task_manager, db_service, nlp_processor, exporters, date_utils, conflict_resolver
+             )
+        else:
+             raise InvalidParamsError("Unsupported part type for update_event intent.")
+
+    elif intent == "create_event" or intent is None: # Treat None intent as create for now
+        logger.debug("Routing to create_event handler", task_id=task_id)
+        # --- Existing Task Creation/Handling Logic ---
+        task = await task_manager.get_task(task_id)
+        if not task:
+            logger.info("Task not found, creating new task state", task_id=task_id)
+            task = await task_manager.create_task(params)
+            # If task creation itself fails, it raises an exception
+
+        # Continue with structured/NLP routing for the *newly created* or *existing* task
+        first_part = message.parts[0]
+        if first_part.type == "data":
+            if not first_part.data:
+                raise InvalidParamsError("Structured data part cannot be empty.")
+            # Call the specific structured data handler (currently only supports create)
+            if not isinstance(first_part.data, dict):
+                raise InvalidParamsError("Structured create requires 'data' part to be a JSON object (dict).")
+            # Use the imported handler function
+            return await handlers.handle_structured_create(
+                task_id, first_part.data, task_manager, db_service, conflict_resolver
+            )
+        elif first_part.type == "text":
+            if not first_part.text:
+                 raise InvalidParamsError("Text part cannot be empty.")
+            # Call NLP handler (handles create via NLP, query, export)
+            return await _dispatch_nlp_request(
+                 task_id, first_part.text, task_manager, db_service, nlp_processor, exporters, date_utils, conflict_resolver
+            )
+        else:
+            raise InvalidParamsError(f"Unsupported first part type for task creation: {first_part.type}")
+            
+    # --- Handle other explicit intents if added later ---
+    # elif intent == "some_other_intent": ...
+
+    else:
+        # If intent is specified but not handled
+        logger.warning("Received unhandled intent", task_id=task_id, intent=intent)
+        raise MethodNotFoundError(f"Intent '{intent}' not supported by tasks/send.")
 
 
 # Placeholder for actual task getting logic (Phase 2, Task 4)

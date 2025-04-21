@@ -37,7 +37,7 @@ async def test_send_task_query_success(
     mock_nlp_result = LLMSchedulingParseResult(
         intent="query_events", date_info=LLMDateInfo(start_date="tomorrow", end_date="tomorrow")
     )
-    mock_nlp_processor.parse_natural_language_query.return_value = mock_nlp_result
+    mock_nlp_processor.process.return_value = mock_nlp_result
 
     # Mock DB query results (e.g., empty list)
     mock_db_service.query_events.return_value = []
@@ -90,7 +90,7 @@ async def test_send_task_query_success(
 
     # Assert mock calls
     mock_task_manager.create_task.assert_called_once()
-    mock_nlp_processor.parse_natural_language_query.assert_awaited_once_with(query)
+    mock_nlp_processor.process.assert_awaited_once_with(query)
     mock_db_service.query_events.assert_awaited_once()
     mock_task_manager.complete_task.assert_awaited_once()
 
@@ -112,6 +112,10 @@ async def test_rpc_tasks_send_unclear_intent(
     rpc_request = JSONRPCRequest(
         jsonrpc="2.0", method="tasks/send", params=params.model_dump(), id=request_id
     )
+
+    # Mock NLP to return 'unknown' intent
+    mock_nlp_result = LLMSchedulingParseResult(intent="unknown")
+    mock_nlp_processor.process.return_value = mock_nlp_result
 
     # Mock the final task state returned by task_manager.require_input_task
     final_task = Task(
@@ -151,11 +155,11 @@ async def test_rpc_tasks_send_unclear_intent(
     assert status_message.get("role") == "agent"
     assert len(status_message.get("parts", [])) == 1
     assert status_message["parts"][0].get("type") == "text"
-    assert "I wasn't sure what you wanted to do" in status_message["parts"][0].get("text", "")
+    assert status_message["parts"][0].get("text", "") == "I wasn't sure what you wanted to do. Could you please rephrase your request?"
 
     # Assert mock calls
     mock_task_manager.create_task.assert_called_once()
-    mock_nlp_processor.parse_natural_language_query.assert_awaited_once_with("test")
+    mock_nlp_processor.process.assert_awaited_once_with("test")
     mock_task_manager.require_input_task.assert_awaited_once()
     mock_task_manager.complete_task.assert_not_called()
     mock_task_manager.fail_task.assert_not_called()

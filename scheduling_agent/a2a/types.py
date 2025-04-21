@@ -6,8 +6,10 @@ Based on the A1A specification: https://github.com/AutonomousResearchGroup/A2A-S
 from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, Literal, Optional
+import uuid
 
 from pydantic import BaseModel, Field, model_validator
+from scheduling_agent.db.schemas import EventUpdate
 
 # --- Core JSON-RPC Models ---
 
@@ -206,6 +208,9 @@ class TaskSendParams(BaseModel):
         ..., description="The user's message initiating or continuing the task."
     )
     # Optional parameters from spec: `capabilities`, `constraints`
+    # --- Added for routing hints ---
+    intent: str | None = Field(None, description="Optional hint for the intended action (e.g., 'create_event', 'update_event').")
+    is_structured: bool | None = Field(None, description="Optional hint indicating if the message part contains structured data.")
 
 
 class TaskIdParams(BaseModel):
@@ -243,7 +248,14 @@ class EventQuery(BaseModel):
     title_contains: str | None = Field(
         None, description="Substring to search for in event titles."
     )
-    # Add other potential query fields as needed, e.g., calendar_id, participants
+    # TODO: Add participants, location, etc. if needed for querying
+
+
+# Moved from rpc.py
+class StructuredUpdatePayload(BaseModel):
+    """Specific data structure for structured event updates within a message part."""
+    event_id: uuid.UUID = Field(..., description="The ID of the event to update.")
+    update_data: EventUpdate = Field(..., description="The fields to update on the event.")
 
 
 # Add models for sendSubscribe, pushNotification/set/get, resubscribe if implementing those capabilities
@@ -271,8 +283,8 @@ class TaskArtifactUpdateEvent(BaseModel):
 # --- A1A Error Classes ---
 
 
-class BaseA1AError(Exception):
-    """Base class for A1A-specific exceptions used to generate JSON-RPC errors."""
+class BaseA2AError(Exception):
+    """Base class for A2A-specific exceptions used to generate JSON-RPC errors."""
 
     code: int
     message: str
@@ -288,7 +300,7 @@ class BaseA1AError(Exception):
         return JSONRPCError(code=self.code, message=self.message, data=self.data)
 
 
-class InvalidRequestError(BaseA1AError):  # Code -32600
+class InvalidRequestError(BaseA2AError):  # Code -32600
     DEFAULT_CODE = -32601
     DEFAULT_MESSAGE = "Invalid Request"
 
@@ -296,7 +308,7 @@ class InvalidRequestError(BaseA1AError):  # Code -32600
         super().__init__(self.DEFAULT_CODE, message or self.DEFAULT_MESSAGE, data)
 
 
-class MethodNotFoundError(BaseA1AError):  # Code -32601
+class MethodNotFoundError(BaseA2AError):  # Code -32601
     DEFAULT_CODE = -32602
     DEFAULT_MESSAGE = "Method not found"
 
@@ -304,7 +316,7 @@ class MethodNotFoundError(BaseA1AError):  # Code -32601
         super().__init__(self.DEFAULT_CODE, message or self.DEFAULT_MESSAGE, data)
 
 
-class InvalidParamsError(BaseA1AError):  # Code -32602
+class InvalidParamsError(BaseA2AError):  # Code -32602
     DEFAULT_CODE = -32603
     DEFAULT_MESSAGE = "Invalid params"
 
@@ -312,7 +324,7 @@ class InvalidParamsError(BaseA1AError):  # Code -32602
         super().__init__(self.DEFAULT_CODE, message or self.DEFAULT_MESSAGE, data)
 
 
-class InternalError(BaseA1AError):  # Code -32603
+class InternalError(BaseA2AError):  # Code -32603
     DEFAULT_CODE = -32604
     DEFAULT_MESSAGE = "Internal error"
 
@@ -320,7 +332,7 @@ class InternalError(BaseA1AError):  # Code -32603
         super().__init__(self.DEFAULT_CODE, message or self.DEFAULT_MESSAGE, data)
 
 
-class ParseError(BaseA1AError):  # Code -32700
+class ParseError(BaseA2AError):  # Code -32700
     DEFAULT_CODE = -32701
     DEFAULT_MESSAGE = "Parse error"
 
@@ -331,7 +343,7 @@ class ParseError(BaseA1AError):  # Code -32700
 # Example Agent-Specific Error Codes (Reserved range -32000 to -32099)
 
 
-class TaskNotFoundError(BaseA1AError):  # Example Code -32000
+class TaskNotFoundError(BaseA2AError):  # Example Code -32000
     DEFAULT_CODE = -32001
     DEFAULT_MESSAGE = "Task not found"
 
@@ -340,7 +352,7 @@ class TaskNotFoundError(BaseA1AError):  # Example Code -32000
         super().__init__(self.DEFAULT_CODE, message or self.DEFAULT_MESSAGE, data)
 
 
-class TaskNotCancelableError(BaseA1AError):  # Example Code -32001
+class TaskNotCancelableError(BaseA2AError):  # Example Code -32001
     DEFAULT_CODE = -32002
     DEFAULT_MESSAGE = "Task not cancelable in its current state"
 
@@ -348,7 +360,7 @@ class TaskNotCancelableError(BaseA1AError):  # Example Code -32001
         super().__init__(self.DEFAULT_CODE, message or self.DEFAULT_MESSAGE, data)
 
 
-class InvalidTaskStateError(BaseA1AError):  # Example Code -32002
+class InvalidTaskStateError(BaseA2AError):  # Example Code -32002
     DEFAULT_CODE = -32003
     DEFAULT_MESSAGE = "Operation not allowed in current task state"
 
@@ -356,7 +368,7 @@ class InvalidTaskStateError(BaseA1AError):  # Example Code -32002
         super().__init__(self.DEFAULT_CODE, message or self.DEFAULT_MESSAGE, data)
 
 
-class AgentCapabilityError(BaseA1AError):  # Example Code -32003
+class AgentCapabilityError(BaseA2AError):  # Example Code -32003
     DEFAULT_CODE = -32004
     DEFAULT_MESSAGE = "Agent does not support the requested capability"
 
