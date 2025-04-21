@@ -33,6 +33,12 @@ from scheduling_agent.a2a.types import (
     TaskState,
     TaskStatus,
 )
+from scheduling_agent.db.schemas import (
+    EventCreate,
+    EventDelete,
+    EventUpdate,
+    EventQuery,
+)
 
 # Conditionally import handle_tasks_cancel for tests
 try:
@@ -52,7 +58,6 @@ from scheduling_agent.core.schemas import (
 
 # Import DB model from .models and DTO schema from .schemas
 from scheduling_agent.db.models import Event
-from scheduling_agent.db.schemas import EventCreate
 from scheduling_agent.db.service import DatabaseService
 from scheduling_agent.a2a.task_manager import SchedulingTaskManager
 
@@ -83,6 +88,7 @@ def mock_db_service_unit() -> AsyncMock:
     mock = AsyncMock(spec=DatabaseService)
     mock.create_event = AsyncMock()
     mock.query_events = AsyncMock()
+    mock.find_events = AsyncMock()
     return mock
 
 
@@ -172,7 +178,9 @@ async def test_handle_tasks_send_create_success(
         "calendar_id": "work",
     }
     params = TaskSendParams(
-        id=task_id, message=Message(role="user", parts=[Part(type="data", data=event_data)])
+        id=task_id,
+        message=Message(role="user", parts=[Part(type="data", data=event_data)]),
+        intent="create_event"
     )
 
     # Define the expected final task state that complete_task should return
@@ -242,7 +250,9 @@ async def test_handle_tasks_send_create_conflict(
         "end_time": "2024-07-01T10:00:00Z",
     }
     params = TaskSendParams(
-        id=task_id, message=Message(role="user", parts=[Part(type="data", data=event_data)])
+        id=task_id,
+        message=Message(role="user", parts=[Part(type="data", data=event_data)]),
+        intent="create_event"
     )
     # Also need the EventCreate model for the conflict resolver call
     event_create_data = EventCreate.model_validate(event_data)
@@ -327,7 +337,9 @@ async def test_handle_tasks_send_query_success(
 
     # Prepare input params
     params = TaskSendParams(
-        id=task_id, message=Message(role="user", parts=[Part(type="text", text=query)])
+        id=task_id,
+        message=Message(role="user", parts=[Part(type="text", text=query)]),
+        intent="query_events"
     )
 
     # Mock NLP result
@@ -345,7 +357,7 @@ async def test_handle_tasks_send_query_success(
         start_time=datetime(2024, 7, 4, 12, 0, 0),
         end_time=datetime(2024, 7, 4, 13, 0, 0),
     )
-    mock_db_service_unit.query_events.return_value = [mock_event]
+    mock_db_service_unit.find_events.return_value = [mock_event]
 
     # Mock expected final task state
     expected_artifact = Artifact(
@@ -370,8 +382,8 @@ async def test_handle_tasks_send_query_success(
     # mock_task_manager_unit.create_task.assert_awaited_once_with(params=params) # REMOVED: create_task is not called in this path
     # Assert NLP was called
     mock_nlp_processor_unit.process.assert_awaited_once_with(query)
-    # Assert DB query was called (check args later if needed)
-    mock_db_service_unit.query_events.assert_awaited_once()
+    # Assert DB find was called (check args later if needed)
+    mock_db_service_unit.find_events.assert_awaited_once()
     # TODO: Check args for query_events based on validated EventQuery
 
     # Assert complete_task was called
@@ -515,7 +527,9 @@ async def test_handle_tasks_send_export_success(
 
     # Prepare input params
     params = TaskSendParams(
-        id=task_id, message=Message(role="user", parts=[Part(type="text", text=query)])
+        id=task_id,
+        message=Message(role="user", parts=[Part(type="text", text=query)]),
+        intent="export_calendar"
     )
 
     # Mock NLP result for export intent
@@ -618,7 +632,9 @@ async def test_handle_tasks_send_export_unsupported_format(
 
     # Prepare input params
     params = TaskSendParams(
-        id=task_id, message=Message(role="user", parts=[Part(type="text", text=query)])
+        id=task_id,
+        message=Message(role="user", parts=[Part(type="text", text=query)]),
+        intent="export_calendar"
     )
 
     # Mock NLP result for export intent with unsupported format
@@ -796,6 +812,100 @@ async def test_handle_rpc_request_invalid_params(
             mock_send.assert_not_called()
         elif method == "tasks/get":
             mock_get.assert_not_called()
+
+
+# --- Unit Tests for handle_tasks_send (Structured Query/Delete) ---
+
+@pytest.mark.asyncio
+async def test_handle_tasks_send_structured_query(
+    mock_task_manager_unit: MagicMock,
+    mock_db_service_unit: AsyncMock,
+    # Mock handlers needed for routing checks
+    mock_nlp_processor_unit: AsyncMock,
+    mock_conflict_resolver_unit: AsyncMock,
+):
+    """Test handle_tasks_send routes to handle_structured_query for EventQuery data."""
+    task_id = str(uuid.uuid4())
+
+    # Prepare input params with EventQuery data
+    query = EventQuery(title_contains="Project Meeting")
+    query_data = query.model_dump(exclude_unset=True)
+    params = TaskSendParams(
+        id=task_id,
+        message=Message(role="user", parts=[Part(type="data", data=query_data)]),
+        intent="query_events"
+    )
+
+    # Mock TaskManager for task creation/retrieval
+    mock_task_manager_unit.get_task.return_value = Task(id=task_id, status=TaskStatus(state=TaskState.SUBMITTED))
+
+    # Mock the target handler's return value (doesn't matter for routing test)
+    # We need to patch the *specific* handler function called within handle_tasks_send
+    with patch("scheduling_agent.handlers.handle_structured_query", new_callable=AsyncMock) as mock_query_handler:
+        mock_query_handler.return_value = Task(id=task_id, status=TaskStatus(state=TaskState.COMPLETED))
+
+        # Action: Call the main send handler
+        returned_task = await handle_tasks_send(
+            params=params,
+            task_manager=mock_task_manager_unit,
+            db_service=mock_db_service_unit,
+            conflict_resolver=mock_conflict_resolver_unit,
+            nlp_processor=mock_nlp_processor_unit,
+            date_utils=DateUtils(), # Provide real DateUtils
+            # exporters not needed for this route
+        )
+
+        # Assertions
+        # Check correct handler was called
+        mock_query_handler.assert_awaited_once_with(
+            task_id, params.message, mock_task_manager_unit, mock_db_service_unit
+        )
+        # Check task manager calls (optional, depends on exact create logic)
+        # mock_task_manager_unit.create_task.assert_awaited_once_with(params) <-- REMOVE THIS ASSERTION
+
+@pytest.mark.asyncio
+async def test_handle_tasks_send_structured_delete(
+    mock_task_manager_unit: MagicMock,
+    mock_db_service_unit: AsyncMock,
+    # Mock handlers needed for routing checks
+    mock_nlp_processor_unit: AsyncMock,
+    mock_conflict_resolver_unit: AsyncMock,
+):
+    """Test handle_tasks_send routes to handle_structured_delete for EventDelete data."""
+    task_id = str(uuid.uuid4())
+    event_id_to_delete = uuid.uuid4()
+
+    # Prepare input params with EventDelete data
+    delete_payload = EventDelete(id=event_id_to_delete)
+    delete_data = delete_payload.model_dump()
+    params = TaskSendParams(
+        id=task_id,
+        message=Message(role="user", parts=[Part(type="data", data=delete_data)]),
+        intent="delete_event"
+    )
+
+    # Mock TaskManager for task creation/retrieval
+    mock_task_manager_unit.get_task.return_value = Task(id=task_id, status=TaskStatus(state=TaskState.SUBMITTED))
+
+    # Patch the target handler
+    with patch("scheduling_agent.handlers.handle_structured_delete", new_callable=AsyncMock) as mock_delete_handler:
+        mock_delete_handler.return_value = Task(id=task_id, status=TaskStatus(state=TaskState.COMPLETED))
+
+        # Action: Call the main send handler
+        returned_task = await handle_tasks_send(
+            params=params,
+            task_manager=mock_task_manager_unit,
+            db_service=mock_db_service_unit,
+            conflict_resolver=mock_conflict_resolver_unit,
+            nlp_processor=mock_nlp_processor_unit,
+            date_utils=DateUtils(), # Provide real DateUtils
+        )
+
+        # Assertions
+        mock_delete_handler.assert_awaited_once_with(
+            task_id, params.message, mock_task_manager_unit, mock_db_service_unit
+        )
+        # mock_task_manager_unit.create_task.assert_awaited_once_with(params) <-- REMOVE THIS ASSERTION
 
 
 # TODO: Add unit test for other intents/paths

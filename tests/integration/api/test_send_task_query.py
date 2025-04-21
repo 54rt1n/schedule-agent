@@ -14,6 +14,7 @@ from scheduling_agent.a2a.types import (
     TaskState,
     TaskStatus,
 )
+from scheduling_agent.db.schemas import EventQuery
 from scheduling_agent.core.schemas import LLMDateInfo, LLMSchedulingParseResult
 
 # Import fixtures from conftest
@@ -39,8 +40,8 @@ async def test_send_task_query_success(
     )
     mock_nlp_processor.process.return_value = mock_nlp_result
 
-    # Mock DB query results (e.g., empty list)
-    mock_db_service.query_events.return_value = []
+    # Mock DB find results (e.g., empty list)
+    mock_db_service.find_events.return_value = []
 
     # Mock the final task state returned by task_manager.complete_task
     final_task = Task(
@@ -91,8 +92,15 @@ async def test_send_task_query_success(
     # Assert mock calls
     mock_task_manager.create_task.assert_called_once()
     mock_nlp_processor.process.assert_awaited_once_with(query)
-    mock_db_service.query_events.assert_awaited_once()
+    mock_db_service.find_events.assert_awaited_once()
     mock_task_manager.complete_task.assert_awaited_once()
+
+    # Verify the query passed to find_events (more robust check)
+    # Access query via keyword arguments
+    call_args = mock_db_service.find_events.call_args
+    assert isinstance(call_args.kwargs['query'], EventQuery)
+    # We can also check specific fields if needed:
+    # assert call_args.kwargs['query'].title_contains is None # Example check
 
 
 @pytest.mark.asyncio

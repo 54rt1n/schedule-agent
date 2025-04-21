@@ -3,10 +3,22 @@
 import uuid
 from datetime import datetime
 
+from pydantic import BaseModel, Field
 from sqlmodel import SQLModel
 
 # Import EventBase from the models file as DTOs inherit from it
 from .models import EventBase
+
+
+class EventQuery(BaseModel):
+    """Parameters for querying events, often derived from NLP."""
+
+    start_time: datetime | None = Field(None, description="Start time for the query range.")
+    end_time: datetime | None = Field(None, description="End time for the query range.")
+    title_contains: str | None = Field(
+        None, description="Substring to search for in event titles."
+    )
+    # TODO: Add participants, location, etc. if needed for querying
 
 
 # Model for reading event data via API
@@ -35,3 +47,9 @@ class EventUpdate(SQLModel):
     # TODO: How to handle participant updates? Add/remove lists?
     # Field to indicate modification of a specific recurring instance
     original_start_time: datetime | None = None
+
+
+# Model for deleting events via API (structured delete)
+class EventDelete(SQLModel):
+    id: uuid.UUID
+

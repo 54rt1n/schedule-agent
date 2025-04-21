@@ -21,7 +21,6 @@ from scheduling_agent.api.dependencies import (
 from scheduling_agent.a2a.types import (
     Artifact,
     CancelTaskParams,  # Add CancelTaskParams
-    EventQuery,
     FileContent,  # Add FileContent
     InternalError,
     InvalidParamsError,
@@ -53,7 +52,7 @@ from scheduling_agent.core.schemas import LLMSchedulingParseResult
 
 # Import the DB table model Event from models and the DTO EventCreate from schemas
 from scheduling_agent.db.models import Event
-from scheduling_agent.db.schemas import EventCreate, EventUpdate
+from scheduling_agent.db.schemas import EventCreate, EventUpdate, EventQuery
 
 # Import db models/services for logic
 from scheduling_agent.db.service import DatabaseService
@@ -201,6 +200,13 @@ async def handle_tasks_send(
     if not message or not message.parts:
         raise InvalidParamsError(message="Message with parts is required for tasks/send.")
 
+    first_part = message.parts[0] # Access first part for type checking
+
+    # --- Explicit check: Intent is required for structured data (type="data") ---
+    if first_part.type == "data" and intent is None:
+        logger.warning("Received structured data without an explicit intent", task_id=task_id)
+        raise InvalidParamsError("An explicit 'intent' is required when sending structured data (type='data').")
+
     # --- Intent-Based Routing ---
     if intent == "update_event":
         logger.debug("Routing to update_event handler", task_id=task_id)
@@ -215,60 +221,134 @@ async def handle_tasks_send(
 
         # 2. Determine if structured or NLP update
         # Use explicit flag first, then check part type as fallback
-        if is_structured or (message.parts[0].type == "data"):
-            if message.parts[0].type != "data" or not message.parts[0].data:
+        if is_structured or (first_part.type == "data"):
+            if first_part.type != "data" or not first_part.data:
                  raise InvalidParamsError("Structured update requires data in the first message part.")
             # Call structured update helper
             return await handlers.handle_structured_update(
-                task_id, message.parts[0].data, task_manager, db_service, conflict_resolver
+                task_id, first_part.data, task_manager, db_service, conflict_resolver
             )
-        elif message.parts[0].type == "text":
+        elif first_part.type == "text":
              # Route to NLP handler (which needs update_event logic added later)
              logger.info("Routing update_event to NLP handler", task_id=task_id)
              return await _dispatch_nlp_request(
-                 task_id, message.parts[0].text, task_manager, db_service, nlp_processor, exporters, date_utils, conflict_resolver
+                 task_id, first_part.text, task_manager, db_service, nlp_processor, exporters, date_utils, conflict_resolver
              )
         else:
              raise InvalidParamsError("Unsupported part type for update_event intent.")
 
-    elif intent == "create_event" or intent is None: # Treat None intent as create for now
+    elif intent == "create_event": 
         logger.debug("Routing to create_event handler", task_id=task_id)
-        # --- Existing Task Creation/Handling Logic ---
+        # --- Task Creation/Retrieval --- 
         task = await task_manager.get_task(task_id)
         if not task:
             logger.info("Task not found, creating new task state", task_id=task_id)
             task = await task_manager.create_task(params)
             # If task creation itself fails, it raises an exception
 
-        # Continue with structured/NLP routing for the *newly created* or *existing* task
-        first_part = message.parts[0]
-        if first_part.type == "data":
-            if not first_part.data:
-                raise InvalidParamsError("Structured data part cannot be empty.")
-            # Call the specific structured data handler (currently only supports create)
-            if not isinstance(first_part.data, dict):
-                raise InvalidParamsError("Structured create requires 'data' part to be a JSON object (dict).")
-            # Use the imported handler function
+        # --- Process based on type (Intent is known to be create_event here) ---
+        if first_part.type == "data": # Structured Create
+            if not first_part.data or not isinstance(first_part.data, dict):
+                raise InvalidParamsError("Structured create_event requires non-empty 'data' part as a JSON object (dict).")
+            # We know intent is create_event, directly call handler
             return await handlers.handle_structured_create(
                 task_id, first_part.data, task_manager, db_service, conflict_resolver
             )
-        elif first_part.type == "text":
+        elif first_part.type == "text": # NLP Create
             if not first_part.text:
-                 raise InvalidParamsError("Text part cannot be empty.")
-            # Call NLP handler (handles create via NLP, query, export)
+                 raise InvalidParamsError("Text part cannot be empty for create_event intent.")
+            # NLP dispatcher handles create_event intent from text
             return await _dispatch_nlp_request(
                  task_id, first_part.text, task_manager, db_service, nlp_processor, exporters, date_utils, conflict_resolver
             )
         else:
-            raise InvalidParamsError(f"Unsupported first part type for task creation: {first_part.type}")
-            
-    # --- Handle other explicit intents if added later ---
-    # elif intent == "some_other_intent": ...
+            raise InvalidParamsError(f"Unsupported first part type for create_event intent: {first_part.type}")
 
+    # --- Handle other explicit intents for structured or text data --- 
+    elif intent == "query_events":
+        logger.debug("Routing to query_events handler", task_id=task_id)
+        task = await task_manager.get_task(task_id) # Ensure task exists or create if needed? (Decide based on requirements)
+        if not task:
+            # Decide: should query create a task if not found, or fail? Let's assume fail for now.
+            logger.warning("Task not found for query_events intent", task_id=task_id)
+            raise TaskNotFoundError(f"Task {task_id} not found, cannot process query.")
+
+        if first_part.type == "data": # Structured Query
+             if not first_part.data or not isinstance(first_part.data, dict):
+                 raise InvalidParamsError("Structured query_events requires non-empty 'data' part as a JSON object (dict).")
+             try:
+                 # Assume handlers.handle_structured_query exists
+                 return await handlers.handle_structured_query(
+                     task_id, message, task_manager, db_service
+                 )
+             except AttributeError:
+                 logger.error("handle_structured_query handler not found in handlers", task_id=task_id)
+                 raise InternalError("Structured query handler is not configured.")
+        elif first_part.type == "text": # NLP Query
+            if not first_part.text:
+                 raise InvalidParamsError("Text part cannot be empty for query_events intent.")
+            return await _dispatch_nlp_request(
+                 task_id, first_part.text, task_manager, db_service, nlp_processor, exporters, date_utils, conflict_resolver
+            )
+        else:
+            raise InvalidParamsError(f"Unsupported first part type for query_events intent: {first_part.type}")
+
+    elif intent == "delete_event":
+        logger.debug("Routing to delete_event handler", task_id=task_id)
+        task = await task_manager.get_task(task_id) # Ensure task exists
+        if not task:
+            logger.warning("Task not found for delete_event intent", task_id=task_id)
+            raise TaskNotFoundError(f"Task {task_id} not found, cannot process delete.")
+
+        if first_part.type == "data": # Structured Delete
+             if not first_part.data or not isinstance(first_part.data, dict):
+                 raise InvalidParamsError("Structured delete_event requires non-empty 'data' part as a JSON object (dict).")
+             try:
+                 # Assume handlers.handle_structured_delete exists
+                 return await handlers.handle_structured_delete(
+                     task_id, message, task_manager, db_service
+                 )
+             except AttributeError:
+                 logger.error("handle_structured_delete handler not found in handlers", task_id=task_id)
+                 raise InternalError("Structured delete handler is not configured.")
+        elif first_part.type == "text": # NLP Delete
+            if not first_part.text:
+                 raise InvalidParamsError("Text part cannot be empty for delete_event intent.")
+            return await _dispatch_nlp_request(
+                 task_id, first_part.text, task_manager, db_service, nlp_processor, exporters, date_utils, conflict_resolver
+            )
+        else:
+            raise InvalidParamsError(f"Unsupported first part type for delete_event intent: {first_part.type}")
+
+    # --- Handle NLP-only intents (or intents where structured data is not applicable/handled) --- 
+    elif intent == "export_calendar":
+         logger.debug("Routing export_calendar intent to NLP handler", task_id=task_id)
+         if first_part.type != "text" or not first_part.text:
+              raise InvalidParamsError("export_calendar intent currently only supports text input.")
+         return await _dispatch_nlp_request(
+              task_id, first_part.text, task_manager, db_service, nlp_processor, exporters, date_utils, conflict_resolver
+         )
+         
+    # --- Handle case where intent is None BUT input type is text (route to NLP) --- 
+    elif intent is None and first_part.type == "text":
+        logger.debug("Routing text input with no intent to NLP handler", task_id=task_id)
+        if not first_part.text:
+            raise InvalidParamsError("Text part cannot be empty.")
+        # Allow NLP to try and determine intent from text when none is provided
+        task = await task_manager.get_task(task_id)
+        if not task:
+            logger.info("Task not found, creating new task state for NLP processing", task_id=task_id)
+            task = await task_manager.create_task(params)
+
+        return await _dispatch_nlp_request(
+             task_id, first_part.text, task_manager, db_service, nlp_processor, exporters, date_utils, conflict_resolver
+        )
+
+    # --- Fallback for unhandled explicit intents --- 
     else:
-        # If intent is specified but not handled
-        logger.warning("Received unhandled intent", task_id=task_id, intent=intent)
-        raise MethodNotFoundError(f"Intent '{intent}' not supported by tasks/send.")
+        # This handles cases where intent is not None, but not one of the handled elif conditions above
+        logger.warning("Received unhandled explicit intent", task_id=task_id, intent=intent)
+        raise MethodNotFoundError(f"Intent '{intent}' is not supported by tasks/send.")
 
 
 # Placeholder for actual task getting logic (Phase 2, Task 4)

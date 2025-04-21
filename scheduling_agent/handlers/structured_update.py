@@ -1,5 +1,7 @@
 from pydantic import ValidationError
+import uuid
 
+from scheduling_agent.a2a.task_manager import SchedulingTaskManager
 from scheduling_agent.a2a.types import (
     Artifact,
     InternalError,
@@ -12,7 +14,6 @@ from scheduling_agent.a2a.types import (
 from scheduling_agent.core.conflict_resolver import ConflictResolver
 from scheduling_agent.core.exceptions import ConflictError
 from scheduling_agent.db.service import DatabaseService
-from scheduling_agent.a2a.task_manager import SchedulingTaskManager
 from scheduling_agent.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -22,10 +23,12 @@ async def handle_structured_update(
     input_data: dict, # This will be the parsed StructuredUpdatePayload.data
     task_manager: SchedulingTaskManager,
     db_service: DatabaseService,
-    conflict_resolver: ConflictResolver,
+    conflict_resolver: ConflictResolver, # noqa: ARG001
 ) -> Task:
     """Handles the logic path for structured update_event intent."""
     logger.info("Handling structured update_event", task_id=task_id)
+    event_id: uuid.UUID | None = None # Initialize event_id
+    structured_payload: StructuredUpdatePayload | None = None # Initialize payload
     try:
         # 1. Validate the structured payload
         structured_payload = StructuredUpdatePayload.model_validate(input_data)
@@ -47,17 +50,16 @@ async def handle_structured_update(
             result_message = f"Event '{event_id}' updated successfully."
             agent_message = Message(role="agent", parts=[Part(type="text", text=result_message)])
             # Create artifact with updated event/instance details
-            artifact_data = updated_event_or_instance.model_dump(mode='json')
+            artifact_data = updated_event_or_instance.model_dump(mode="json")
             artifact = Artifact(name="updated_event_details", parts=[Part(type="data", data=artifact_data)])
             final_task = await task_manager.complete_task(task_id, agent_message, artifact)
             return final_task
-        else:
-            # Event not found by db_service.update_event
-            logger.warning("Event not found during update attempt", task_id=task_id, event_id=event_id)
-            agent_message = Message(role="agent", parts=[Part(type="text", text=f"Could not find event with ID '{event_id}' to update.")])
-            # Fail the A2A task
-            final_task = await task_manager.fail_task(task_id, agent_message)
-            return final_task
+        # Event not found by db_service.update_event
+        logger.warning("Event not found during update attempt", task_id=task_id, event_id=event_id)
+        agent_message = Message(role="agent", parts=[Part(type="text", text=f"Could not find event with ID '{event_id}' to update.")])
+        # Fail the A2A task
+        final_task = await task_manager.fail_task(task_id, agent_message)
+        return final_task
 
     except ConflictError as ce:
         # Handle potential conflicts if update_event starts checking them
@@ -69,23 +71,26 @@ async def handle_structured_update(
         conflict_artifact = Artifact(name="scheduling_conflicts", parts=[Part(type="data", data=ce.conflicts)])
         final_task = await task_manager.require_input_task(task_id, agent_message, conflict_artifact)
         return final_task
+    except ValidationError as ve:
+        # Handle Pydantic validation error for StructuredUpdatePayload or EventUpdate
+        logger.warning("Invalid structured update payload received", task_id=task_id, validation_error=ve.errors())
+        raise InvalidParamsError(message="Invalid data provided for event update.", data=ve.errors()) from ve
     except NotImplementedError as nie:
         # Handle unsupported updates (e.g., series time change)
-        logger.error("Unsupported update operation attempted", task_id=task_id, event_id=event_id, error=str(nie))
-        agent_message = Message(role="agent", parts=[Part(type="text", text=f"Failed to update event '{event_id}': {str(nie)}")])
+        logger.exception("Unsupported update operation attempted", task_id=task_id, event_id=event_id, error=str(nie))
+        agent_message = Message(role="agent", parts=[Part(type="text", text=f"Failed to update event '{event_id}': {nie!s}")])
         final_task = await task_manager.fail_task(task_id, agent_message)
         return final_task
     except ValueError as ve:
-        # Handle validation errors within update logic (e.g., missing instance times)
-        logger.error("Value error during event update", task_id=task_id, event_id=event_id, error=str(ve))
-        agent_message = Message(role="agent", parts=[Part(type="text", text=f"Failed to update event '{event_id}': {str(ve)}")])
+        # Handle other validation errors within update logic (e.g., missing instance times)
+        # Use the event_id variable which is now guaranteed to exist (might be None)
+        logger.exception("Value error during event update", task_id=task_id, event_id=event_id, error=str(ve))
+        agent_message = Message(role="agent", parts=[Part(type="text", text=f"Failed to update event '{event_id}': {ve!s}")])
         final_task = await task_manager.fail_task(task_id, agent_message)
         return final_task
-    except ValidationError as ve:
-        # Handle Pydantic validation error for StructuredUpdatePayload
-        logger.warning("Invalid structured update payload received", task_id=task_id, validation_error=ve.errors())
-        raise InvalidParamsError(message="Invalid data provided for event update.", data=ve.errors()) from ve
     except Exception as e:
         # Catch unexpected errors during update
-        logger.exception("Unexpected error during structured event update", task_id=task_id, event_id=getattr(structured_payload, 'event_id', 'unknown'), error=str(e))
-        raise InternalError(message=f"An unexpected error occurred while updating event.") from e 
+        # Attempt to get event_id from the potentially assigned structured_payload
+        event_id_str = str(getattr(structured_payload, "event_id", "unknown")) # Use payload var
+        logger.exception("Unexpected error during structured event update", task_id=task_id, event_id=event_id_str, error=str(e))
+        raise InternalError(message="An unexpected error occurred while updating event.") from e

@@ -240,18 +240,6 @@ class CancelTaskParams(TaskIdParams):
 # --- Custom Parameter/Data Models for Specific Agent Logic ---
 
 
-class EventQuery(BaseModel):
-    """Parameters for querying events, often derived from NLP."""
-
-    start_time: datetime | None = Field(None, description="Start time for the query range.")
-    end_time: datetime | None = Field(None, description="End time for the query range.")
-    title_contains: str | None = Field(
-        None, description="Substring to search for in event titles."
-    )
-    # TODO: Add participants, location, etc. if needed for querying
-
-
-# Moved from rpc.py
 class StructuredUpdatePayload(BaseModel):
     """Specific data structure for structured event updates within a message part."""
     event_id: uuid.UUID = Field(..., description="The ID of the event to update.")

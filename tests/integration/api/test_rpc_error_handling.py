@@ -58,8 +58,8 @@ async def test_rpc_internal_error_on_db_exception(
     mock_nlp_result = LLMSchedulingParseResult(intent="query_events")
     mock_nlp_processor.process.return_value = mock_nlp_result
 
-    # 3. Mock DatabaseService.query_events to raise DatabaseError
-    mock_db_service.query_events.side_effect = DatabaseError(error_message)
+    # 3. Mock DatabaseService.find_events to raise DatabaseError
+    mock_db_service.find_events.side_effect = DatabaseError(error_message)
 
     # Prepare RPC request (tasks/send with text query)
     params = TaskSendParams(
@@ -94,7 +94,7 @@ async def test_rpc_internal_error_on_db_exception(
     # TaskManager might not be called if create_task is mocked elsewhere or handled differently
     # mock_task_manager.create_task.assert_awaited_once()
     mock_nlp_processor.process.assert_awaited_once()
-    mock_db_service.query_events.assert_awaited_once()
+    mock_db_service.find_events.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -341,6 +341,7 @@ async def test_rpc_internal_error_on_conflict_resolver_exception(
         message=Message(
             role="user", parts=[Part(type="data", data=event_data.model_dump(mode="json"))]
         ),
+        intent="create_event"
     )
     rpc_request = JSONRPCRequest(
         jsonrpc="2.0", method="tasks/send", params=params.model_dump(), id=request_id

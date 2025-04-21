@@ -1,5 +1,6 @@
 import base64
 
+from scheduling_agent.a2a.task_manager import SchedulingTaskManager
 from scheduling_agent.a2a.types import (
     Artifact,
     FileContent,
@@ -12,7 +13,6 @@ from scheduling_agent.core.date_utils import DateUtils
 from scheduling_agent.core.exporters.base import CalendarExporter
 from scheduling_agent.core.schemas import LLMSchedulingParseResult
 from scheduling_agent.db.service import DatabaseService
-from scheduling_agent.a2a.task_manager import SchedulingTaskManager
 from scheduling_agent.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -87,4 +87,4 @@ async def handle_nlp_export(
         # Catch InvalidParamsError specifically to let it propagate clearly
         logger.warning(f"InvalidParamsError during export: {ipe.message}", task_id=task_id)
         raise
-    # Let other errors (DatabaseError, ExporterError, etc.) propagate 
+    # Let other errors (DatabaseError, ExporterError, etc.) propagate

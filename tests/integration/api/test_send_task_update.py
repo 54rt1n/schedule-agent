@@ -6,8 +6,8 @@ import pytest
 from httpx import AsyncClient
 
 from scheduling_agent.a2a import types as a2a_types
-from scheduling_agent.a2a.types import StructuredUpdatePayload, EventQuery
-from scheduling_agent.db.schemas import EventUpdate
+from scheduling_agent.a2a.types import StructuredUpdatePayload
+from scheduling_agent.db.schemas import EventUpdate, EventQuery
 from scheduling_agent.db.models import Event, ModifiedInstance # For mock return types
 from scheduling_agent.core.exceptions import ConflictError, TaskNotFoundError
 from scheduling_agent.db.service import DatabaseService # For mocking spec

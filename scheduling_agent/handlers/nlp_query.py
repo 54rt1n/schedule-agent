@@ -1,8 +1,8 @@
 from pydantic import ValidationError
 
+from scheduling_agent.a2a.task_manager import SchedulingTaskManager
 from scheduling_agent.a2a.types import (
     Artifact,
-    EventQuery,
     InternalError,
     Message,
     Part,
@@ -11,7 +11,7 @@ from scheduling_agent.a2a.types import (
 from scheduling_agent.core.exceptions import DatabaseError
 from scheduling_agent.core.schemas import LLMSchedulingParseResult
 from scheduling_agent.db.service import DatabaseService
-from scheduling_agent.a2a.task_manager import SchedulingTaskManager
+from scheduling_agent.db.schemas import EventQuery
 from scheduling_agent.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -36,16 +36,16 @@ async def handle_nlp_query(
 
         # ---- Start Edit: Catch DatabaseError ----
         try:
-            queried_events = await db_service.query_events(query=event_query)
+            queried_events = await db_service.find_events(query=event_query)
         except DatabaseError as dbe:
             logger.exception("Database error during event query", task_id=task_id, error=dbe)
             # Raise InternalError so it's caught by the main handler's generic exception block
-            raise InternalError("An internal error occurred while querying the database.")
+            raise InternalError("An internal error occurred while querying the database.") from dbe
         # ---- End Edit ----
 
         if queried_events:
             result_message = f"Found {len(queried_events)} event(s) matching your query."
-            events_data = [event.model_dump(mode='json') for event in queried_events]
+            events_data = [event.model_dump(mode="json") for event in queried_events]
             artifact = Artifact(name="queried_events", parts=[Part(type="data", data=events_data)])
         else:
             result_message = "No events found matching your query."
@@ -66,4 +66,4 @@ async def handle_nlp_query(
         agent_message = Message(role="agent", parts=[Part(type="text", text=clarification_msg)])
         final_task = await task_manager.require_input_task(task_id, agent_message)
         return final_task
-    # Let other errors propagate to the main NLP handler (_handle_send_nlp_input) 
+    # Let other errors propagate to the main NLP handler (_handle_send_nlp_input)

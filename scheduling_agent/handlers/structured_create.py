@@ -1,6 +1,6 @@
-from fastapi import Depends
 from pydantic import ValidationError
 
+from scheduling_agent.a2a.task_manager import SchedulingTaskManager
 from scheduling_agent.a2a.types import (
     Artifact,
     InternalError,
@@ -14,7 +14,6 @@ from scheduling_agent.core.exceptions import ConflictError
 from scheduling_agent.db.models import Event
 from scheduling_agent.db.schemas import EventCreate
 from scheduling_agent.db.service import DatabaseService
-from scheduling_agent.a2a.task_manager import SchedulingTaskManager
 from scheduling_agent.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -40,7 +39,7 @@ async def handle_structured_create(
             result_message = f"Event '{created_event.title}' created successfully."
             agent_message = Message(role="agent", parts=[Part(type="text", text=result_message)])
             artifact = Artifact(
-                name="created_event", parts=[Part(type="data", data=created_event.model_dump(mode='json'))] # Ensure JSON serializable
+                name="created_event", parts=[Part(type="data", data=created_event.model_dump(mode="json"))] # Ensure JSON serializable
             )
 
             # Update task state via TaskManager
@@ -61,7 +60,7 @@ async def handle_structured_create(
                 conflict_info = {
                     "message": str(ce),
                     "conflicts": [
-                        c["event"].model_dump(mode='json') # Ensure JSON serializable
+                        c["event"].model_dump(mode="json") # Ensure JSON serializable
                         for c in ce.conflicts
                         if isinstance(c.get("event"), Event)
                     ],
@@ -101,4 +100,4 @@ async def handle_structured_create(
         )
         # Fail task directly? Or raise error?
         # Let's raise InvalidParamsError for consistency. The task might be failed by the caller if needed.
-        raise InvalidParamsError(message="Could not determine create action from structured data provided.") 
+        raise InvalidParamsError(message="Could not determine create action from structured data provided.")

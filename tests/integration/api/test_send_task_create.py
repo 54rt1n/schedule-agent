@@ -83,7 +83,9 @@ async def test_send_task_create_success(
         "calendar_id": "primary",
     }
     params = TaskSendParams(
-        id=task_id, message=Message(role="user", parts=[Part(type="data", data=event_data)])
+        id=task_id,
+        message=Message(role="user", parts=[Part(type="data", data=event_data)]),
+        intent="create_event"
     )
     rpc_request = JSONRPCRequest(
         jsonrpc="2.0",
@@ -142,7 +144,9 @@ async def test_send_task_create_conflict(
         "end_time": "2025-01-02T12:00:00Z",
     }
     params = TaskSendParams(
-        id=task_id, message=Message(role="user", parts=[Part(type="data", data=event_data)])
+        id=task_id,
+        message=Message(role="user", parts=[Part(type="data", data=event_data)]),
+        intent="create_event"
     )
     rpc_request = JSONRPCRequest(
         jsonrpc="2.0",

@@ -17,10 +17,9 @@ from .database import get_async_session
 from .models import Event, Participant, A2ATask, ModifiedInstance
 # Import A2A types
 from scheduling_agent.a2a import types as a2a_types
-from scheduling_agent.a2a.types import EventQuery
 
 # Import DTO schemas from .schemas
-from .schemas import EventCreate, EventUpdate
+from .schemas import EventCreate, EventUpdate, EventQuery
 
 logger = get_logger(__name__)
 
