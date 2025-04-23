@@ -123,102 +123,106 @@ class DatabaseService:
 
     async def get_events_in_range(self, start: datetime, end: datetime) -> list[Event]:
         """Retrieves events that overlap with the given time range, including recurrences."""
-        # Ensure input datetimes are naive UTC (or handle aware inputs)
+        logger.debug(
+            f"Getting events in range: Start={start.isoformat()}, End={end.isoformat()}"
+        )
+        # Ensure input datetimes are naive UTC for DB comparison
         if start.tzinfo is not None:
             start_utc = self.date_utils.normalize_to_utc(start)
             start = start_utc.replace(tzinfo=None)
+            logger.debug(f"Normalized query start to naive UTC: {start.isoformat()}")
         if end.tzinfo is not None:
             end_utc = self.date_utils.normalize_to_utc(end)
             end = end_utc.replace(tzinfo=None)
+            logger.debug(f"Normalized query end to naive UTC: {end.isoformat()}")
 
-        # Convert range times back to aware UTC for dateutil calculations
+        # Keep aware UTC versions of the range for recurrence expansion calculations
         range_start_aware_utc = start.replace(tzinfo=UTC)
         range_end_aware_utc = end.replace(tzinfo=UTC)
 
         final_event_instances = []
 
         async with get_async_session(self.session_factory) as session:
-            # Ensure input datetimes are naive UTC for comparison with DB
-            start = start.replace(tzinfo=None) if start.tzinfo else start
-            end = end.replace(tzinfo=None) if end.tzinfo else end
-            range_start_aware_utc = start.replace(
-                tzinfo=UTC
-            )  # Keep aware versions for expansion
-            range_end_aware_utc = end.replace(tzinfo=UTC)
+            # Use naive UTC datetimes for database query conditions
+            query_start_naive_utc = start
+            query_end_naive_utc = end
 
             # 1. Get strictly non-recurring events within the range
+            # Overlap condition: Event starts before range ends AND Event ends after range starts
             non_recurring_stmt = select(Event).where(
                 Event.rrule.is_(None),  # Explicitly non-recurring
-                Event.start_time <= end,  # Overlaps end of range
-                Event.end_time >= start,  # Overlaps start of range
+                Event.start_time < query_end_naive_utc,  # Event starts before the range ends
+                Event.end_time > query_start_naive_utc,  # Event ends after the range starts
             )
             result_non_recurring = await session.execute(non_recurring_stmt)
-            # Initialize the results ONLY with non-recurring events
             final_event_instances = list(result_non_recurring.scalars().all())
+            logger.debug(f"Found {len(final_event_instances)} non-recurring events.")
 
             # 2. Get base definitions of recurring events that could potentially overlap
-            # Optimization: A better query would filter based on RRULE properties if possible.
-            # Select recurring events whose start time is before the range ends (they might have instances in the range)
+            # Fetch recurring events whose base start time is before the query range ends.
+            # This is a pre-filter: it might fetch events whose recurrences (due to COUNT/UNTIL)
+            # actually end before the query range starts, but those will be filtered out during expansion.
+            # It correctly excludes events that start *after* the range end and are infinite or end later.
             recurring_base_stmt = (
                 select(Event)
                 .where(
                     Event.rrule.is_not(None),  # Explicitly recurring
-                    Event.start_time <= end,  # Base start time is before range end
-                    # Note: We don't filter by end_time here, as recurrence could extend beyond base end
+                    Event.start_time < query_end_naive_utc, # Base start time is before range end (use < for consistency?)
+                    # Event.start_time <= end, # Previous logic - using < might be slightly stricter but less likely to cause issues.
+                    # Let's keep '< end' consistent with the non-recurring logic and instance filter.
                 )
-                # Eager load exceptions needed for expansion
+                # Eager load relationships needed for expansion
                 .options(selectinload(Event.excluded_dates), selectinload(Event.modified_instances))
             )
             result_recurring_base = await session.execute(recurring_base_stmt)
             recurring_base_events = result_recurring_base.scalars().unique().all()
+            logger.debug(f"Found {len(recurring_base_events)} potential recurring base events.")
 
             # 3. Expand recurring events and add ONLY valid instances to the list
             for base_event in recurring_base_events:
-                # Do not add base_event itself to final_event_instances here
-
+                logger.debug(f"Expanding recurrence for base event {base_event.id}")
                 expanded_occurrences_data = self.date_utils.expand_recurrence(
                     base_event=base_event,
-                    range_start_utc=range_start_aware_utc,
-                    range_end_utc=range_end_aware_utc,
-                    excluded_dates=base_event.excluded_dates,  # Pass eagerly loaded data
-                    modified_instances=base_event.modified_instances,  # Pass eagerly loaded data
+                    range_start_utc=range_start_aware_utc, # Pass aware UTC range
+                    range_end_utc=range_end_aware_utc,   # Pass aware UTC range
+                    excluded_dates=base_event.excluded_dates,
+                    modified_instances=base_event.modified_instances,
                 )
 
-                # Convert expanded dicts back to Event-like objects (or just use dicts)
-                # For simplicity, let's create Event objects for the return type consistency
-                # We only include essential fields, not full DB model state.
+                # Filter expanded occurrences for overlap with the query range
                 for occ_data in expanded_occurrences_data:
-                    # Create a temporary Event object from the occurrence data
-                    # Ensure datetimes are naive UTC as stored in DB
+                    # Instance times from expand_recurrence are aware UTC.
+                    # Convert to naive UTC for overlap check against naive query range.
                     occ_start_naive = occ_data["start_time"].replace(tzinfo=None)
                     occ_end_naive = occ_data["end_time"].replace(tzinfo=None)
 
-                    # Put the overlap check back in place
-                    if occ_start_naive <= end and occ_end_naive >= start:
+                    # Overlap condition: Instance starts before range ends AND Instance ends after range starts
+                    if occ_start_naive < query_end_naive_utc and occ_end_naive > query_start_naive_utc:
+                        # Create an Event object for the instance (transient, not persisted)
                         instance_event = Event(
-                            # Generate a unique-ish ID for the instance? Or use base ID?
-                            # Using base ID for now, but might need refinement if instances need unique IDs.
-                            # Let's use base_event.id + original_date for uniqueness if needed
-                            id=occ_data.get("modified_instance_id")
-                            or base_event.id,  # Use modified ID if it exists
+                            # Use modified ID if available, otherwise base event ID
+                            id=occ_data.get("modified_instance_id") or base_event.id,
                             title=occ_data["title"],
-                            start_time=occ_start_naive,
-                            end_time=occ_end_naive,
-                            time_zone=occ_data["time_zone"],
+                            start_time=occ_start_naive, # Store naive UTC
+                            end_time=occ_end_naive,   # Store naive UTC
+                            time_zone=occ_data["time_zone"], # Preserve original/modified TZ
                             location=occ_data["location"],
                             notes=occ_data["notes"],
-                            rrule=None,  # Instances don't have rrule
-                            # Copy created_at/updated_at from base? Or leave default?
-                            # Let's use base for now, could add instance_start_time field later
-                            created_at=base_event.created_at,
+                            rrule=None,  # Instances do not have an RRULE
+                            created_at=base_event.created_at, # Carry over base timestamps
                             updated_at=base_event.updated_at,
-                            # TODO: How to handle participants for instances? Copy from base?
+                            # Participants not handled here, would require specific logic
                         )
-                        # Add the generated instance to the list IF it overlaps
                         final_event_instances.append(instance_event)
+                        logger.debug(
+                            f"Added instance for event {base_event.id}: "
+                            f"Start={instance_event.start_time.isoformat()}, "
+                            f"End={instance_event.end_time.isoformat()}"
+                        )
 
         # 4. Sort final list by start time
         final_event_instances.sort(key=lambda evt: evt.start_time)
+        logger.debug(f"Returning {len(final_event_instances)} final event instances.")
 
         return final_event_instances
 
