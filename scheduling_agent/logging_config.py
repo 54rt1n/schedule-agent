@@ -29,7 +29,6 @@ def setup_logging():
         structlog.processors.TimeStamper(fmt="iso"),
         structlog.processors.StackInfoRenderer(),
         structlog.dev.set_exc_info,
-        structlog.processors.format_exc_info,
         structlog.processors.UnicodeDecoder(),
     ]
 
@@ -62,7 +61,11 @@ def setup_logging():
 
     # Suppress overly verbose logs from libraries if needed
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
-    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn").setLevel(logging.WARNING)
+    # Increase logging for SQLAlchemy engine and pool during debugging
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.DEBUG)
+    logging.getLogger("sqlalchemy.pool").setLevel(logging.DEBUG)
+    logging.getLogger("mcp.server.lowlevel.server").setLevel(logging.WARNING)
 
     logger = structlog.get_logger("scheduling_agent")
     logger.info("Logging configured", log_level=log_level)

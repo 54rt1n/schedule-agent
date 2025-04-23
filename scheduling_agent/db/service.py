@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, sessionmaker
 from sqlmodel import select
+from sqlalchemy import func
 
 from scheduling_agent.core.conflict_resolver import ConflictResolver
 from scheduling_agent.core.date_utils import DateUtils
@@ -227,13 +228,18 @@ class DatabaseService:
         async with get_async_session(self.session_factory) as session:
             stmt = select(Event)
 
-            # Basic filtering - Start with title if provided
-            if query.title:
-                # Use ilike for case-insensitive partial matching
-                stmt = stmt.where(Event.title.ilike(f"%{query.title}%"))
+            if query.start_time and query.end_time:
+                # TODO: Handle timezone conversion logic here if needed
+                # Currently assumes DB stores naive UTC and query provides aware times
+                naive_start = query.start_time.replace(tzinfo=None)
+                naive_end = query.end_time.replace(tzinfo=None)
+                stmt = stmt.where(Event.start_time < naive_end, Event.end_time > naive_start)
 
-            # TODO: Add filtering for other EventQuery fields (start_time, end_time, participants, etc.)
-            # This might involve logic similar to get_events_in_range for time overlaps
+            if query.title_contains:
+                # Case-insensitive title search
+                stmt = stmt.where(func.lower(Event.title).contains(query.title_contains.lower()))
+
+            # TODO: Add sorting if needed (e.g., by start_time)
 
             # Add options to load related data if needed by callers
             stmt = stmt.options(
