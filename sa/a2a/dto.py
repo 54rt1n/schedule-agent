@@ -12,7 +12,6 @@ import uuid
 
 from sa.db.dao import EventUpdate
 
-
 # --- Core JSON-RPC Models ---
 
 class JSONRPCError(BaseModel):
@@ -266,102 +265,6 @@ class TaskArtifactUpdateEvent(BaseModel):
 
     id: str = Field(..., description="The task identifier.")
     artifact: Artifact = Field(..., description="The artifact that was generated.")
-
-
-# --- A2A Error Classes ---
-
-
-class BaseA2AError(Exception):
-    """Base class for A2A-specific exceptions used to generate JSON-RPC errors."""
-
-    code: int
-    message: str
-    data: Any | None
-
-    def __init__(self, code: int, message: str, data: Any | None = None):
-        self.code = code
-        self.message = message
-        self.data = data
-        super().__init__(message)
-
-    def as_jsonrpc_error(self) -> JSONRPCError:
-        return JSONRPCError(code=self.code, message=self.message, data=self.data)
-
-
-class InvalidRequestError(BaseA2AError):  # Code -32600
-    DEFAULT_CODE = -32600
-    DEFAULT_MESSAGE = "Invalid Request"
-
-    def __init__(self, message: str | None = None, data: Any | None = None):
-        super().__init__(self.DEFAULT_CODE, message or self.DEFAULT_MESSAGE, data)
-
-
-class MethodNotFoundError(BaseA2AError):  # Code -32601
-    DEFAULT_CODE = -32601
-    DEFAULT_MESSAGE = "Method not found"
-
-    def __init__(self, message: str | None = None, data: Any | None = None):
-        super().__init__(self.DEFAULT_CODE, message or self.DEFAULT_MESSAGE, data)
-
-
-class InvalidParamsError(BaseA2AError):  # Code -32602
-    DEFAULT_CODE = -32602
-    DEFAULT_MESSAGE = "Invalid params"
-
-    def __init__(self, message: str | None = None, data: Any | None = None):
-        super().__init__(self.DEFAULT_CODE, message or self.DEFAULT_MESSAGE, data)
-
-
-class InternalError(BaseA2AError):  # Code -32603
-    DEFAULT_CODE = -32603
-    DEFAULT_MESSAGE = "Internal error"
-
-    def __init__(self, message: str | None = None, data: Any | None = None):
-        super().__init__(self.DEFAULT_CODE, message or self.DEFAULT_MESSAGE, data)
-
-
-class ParseError(BaseA2AError):  # Code -32700
-    DEFAULT_CODE = -32700
-    DEFAULT_MESSAGE = "Parse error"
-
-    def __init__(self, message: str | None = None, data: Any | None = None):
-        super().__init__(self.DEFAULT_CODE, message or self.DEFAULT_MESSAGE, data)
-
-
-# Example Agent-Specific Error Codes (Reserved range -32000 to -32099)
-
-
-class TaskNotFoundError(BaseA2AError):  # Example Code -32000
-    DEFAULT_CODE = -32001
-    DEFAULT_MESSAGE = "Task not found"
-
-    def __init__(self, message: str | None = None, data: Any | None = None):
-        # Allow specific message like "Task with ID xyz not found"
-        super().__init__(self.DEFAULT_CODE, message or self.DEFAULT_MESSAGE, data)
-
-
-class TaskNotCancelableError(BaseA2AError):  # Example Code -32001
-    DEFAULT_CODE = -32002
-    DEFAULT_MESSAGE = "Task not cancelable in its current state"
-
-    def __init__(self, message: str | None = None, data: Any | None = None):
-        super().__init__(self.DEFAULT_CODE, message or self.DEFAULT_MESSAGE, data)
-
-
-class InvalidTaskStateError(BaseA2AError):  # Example Code -32002
-    DEFAULT_CODE = -32003
-    DEFAULT_MESSAGE = "Operation not allowed in current task state"
-
-    def __init__(self, message: str | None = None, data: Any | None = None):
-        super().__init__(self.DEFAULT_CODE, message or self.DEFAULT_MESSAGE, data)
-
-
-class AgentCapabilityError(BaseA2AError):  # Example Code -32003
-    DEFAULT_CODE = -32004
-    DEFAULT_MESSAGE = "Agent does not support the requested capability"
-
-    def __init__(self, message: str | None = None, data: Any | None = None):
-        super().__init__(self.DEFAULT_CODE, message or self.DEFAULT_MESSAGE, data)
 
 
 # --- Agent Card Models ---

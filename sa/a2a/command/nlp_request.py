@@ -4,14 +4,7 @@
 from pydantic import ValidationError
 
 from sa.a2a.task_manager import SchedulingTaskManager
-from sa.a2a.dto import (
-    Artifact,
-    InternalError,
-    InvalidParamsError,
-    Message,
-    Part,
-    Task,
-)
+from sa.a2a.dto import Message, Part, Task
 from sa.core.logging_config import get_logger
 from sa.db.service import DatabaseService
 from sa.event.date_utils import DateUtils

@@ -7,7 +7,7 @@ from typing import Any, TypeVar, Generic
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sa.core.exceptions import DatabaseError, TaskNotFoundError
+from sa.core.exceptions import DatabaseError, TaskNotFoundError, ConflictError, CoreLogicError
 from sa.db.service import DatabaseService
 
 logger = logging.getLogger(__name__)
@@ -86,20 +86,18 @@ class DatabaseExecutionStrategy(abc.ABC, Generic[InputType, ReturnType]):
                 logger.debug(f"Strategy {strategy_name} committed successfully.")
                 return result
         except TaskNotFoundError as e: # Catch specific known application errors
-            # Log the specific error but re-raise it directly
             logger.warning(
                 f"Application error in strategy {strategy_name}: {e}"
             )
-            # Rollback should still happen via context manager exit
-            # Optional: Call _failure if needed for application errors too
-            # if session is not None:
-            #     try:
-            #         await self._failure(session=session, exception=e)
-            #     except Exception as failure_ex:
-            #         logger.exception(f"Error during _failure for {strategy_name} on TaskNotFoundError: {failure_ex}")
-            raise e # Re-raise the original TaskNotFoundError
+            raise e
 
-        except Exception as e: # Catch other exceptions (DB errors, unexpected issues)
+        except ConflictError as ce:
+             logger.warning(
+                 f"ConflictError in strategy {strategy_name}: {ce}"
+             )
+             raise ce
+
+        except Exception as e:
             logger.error(
                 f"Error executing strategy {strategy_name}: {e}. Initiating rollback.",
                 exc_info=True,
@@ -111,7 +109,6 @@ class DatabaseExecutionStrategy(abc.ABC, Generic[InputType, ReturnType]):
                 except Exception as failure_ex:
                     logger.exception(f"Error during custom _failure for {strategy_name}: {failure_ex}")
 
-            # Wrap unexpected/DB errors in DatabaseError
             raise DatabaseError(
-                f"Strategy {strategy_name} failed: {e}"
+                f"Strategy {strategy_name} failed due to unexpected error: {e}"
             ) from e

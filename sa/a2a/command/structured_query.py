@@ -11,6 +11,7 @@ from sa.core.logging_config import get_logger
 from sa.db.dao import EventQuery
 from sa.db.service import DatabaseService
 from sa.db.strategies.find_events import FindEventsStrategy
+from sa.a2a.exceptions import InvalidParamsError, InternalError
 
 logger = get_logger(__name__)
 
@@ -30,18 +31,18 @@ async def handle_structured_query(
     try:
         # 1. Extract and validate the payload
         if not message.parts or message.parts[0].type != "data":
-            raise ValueError("Missing or invalid data part in message for structured query.")
+            raise InvalidParamsError("Missing or invalid data part in message for structured query.")
 
         payload_data = message.parts[0].data
         if not isinstance(payload_data, dict):
-            raise ValueError("Data part payload is not a dictionary.")
+            raise InvalidParamsError("Data part payload is not a dictionary.")
 
         try:
             query_params = EventQuery.model_validate(payload_data)
             logger.debug(f"Validated query parameters: {query_params}")
         except ValidationError as e:
             logger.warning(f"Invalid EventQuery payload for task {task_id}: {e}")
-            raise ValueError(f"Invalid query parameters: {e}")
+            raise InvalidParamsError(f"Invalid query parameters: {e}", data=e.errors())
 
         # 2. Call the find_events strategy
         find_strategy = FindEventsStrategy(db_service=db_service) # Pass dependencies
@@ -71,14 +72,12 @@ async def handle_structured_query(
         agent_message = Message(role="agent", parts=[Part(type="text", text=result_message)])
         return await task_manager.complete_task(task_id, agent_message)
 
-    except ValueError as e:
-        error_text = f"Error processing query: {e}"
-        logger.error(f"Value error processing structured query for task {task_id}: {e}")
-        agent_message = Message(role="agent", parts=[Part(type="text", text=error_text)])
-        return await task_manager.fail_task(task_id, agent_message)
+    except InvalidParamsError as ipe:
+        error_text = f"Error processing query: {ipe}"
+        logger.error(f"InvalidParamsError processing structured query for task {task_id}: {ipe}")
+        raise ipe
     except Exception as e:
         error_text = f"An unexpected error occurred: {e}"
         # Catch other potential errors (e.g., database connection)
         logger.exception(f"Unexpected error processing structured query for task {task_id}: {e}")
-        agent_message = Message(role="agent", parts=[Part(type="text", text=error_text)])
-        return await task_manager.fail_task(task_id, agent_message) 
+        raise InternalError(message=error_text) from e

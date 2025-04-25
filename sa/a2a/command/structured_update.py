@@ -3,17 +3,8 @@
 
 from pydantic import ValidationError
 import uuid
-import json
 
-from sa.a2a.dto import (
-    Artifact,
-    InternalError,
-    InvalidParamsError,
-    Message,
-    Part,
-    StructuredUpdatePayload,
-    Task,
-)
+from sa.a2a.dto import Artifact, Message, Part, StructuredUpdatePayload, Task
 from sa.a2a.task_manager import SchedulingTaskManager
 from sa.core.exceptions import ConflictError
 from sa.core.logging_config import get_logger
@@ -21,6 +12,7 @@ from sa.db.service import DatabaseService
 from sa.event.conflict_resolver import ConflictResolver
 from sa.db.strategies.update_event import UpdateEventStrategy
 from sa.event.date_utils import DateUtils
+from sa.a2a.exceptions import InvalidParamsError, InternalError
 
 logger = get_logger(__name__)
 
@@ -39,7 +31,7 @@ async def handle_structured_update(
     structured_payload: StructuredUpdatePayload | None = None # Initialize payload
     try:
         if not message.parts or message.parts[0].data is None:
-            raise ValueError("Missing data payload in message parts.")
+            raise InvalidParamsError("Missing data payload in message parts.")
         input_data = message.parts[0].data
 
         # 1. Validate the structured payload
@@ -69,23 +61,13 @@ async def handle_structured_update(
             final_task = await task_manager.complete_task(task_id, agent_message, artifact)
             return final_task
         # Event not found by db_service.update_event
-        logger.warning("Event not found during update attempt", task_id=task_id, event_id=event_id)
-        # Construct agent message for failure
-        agent_message = Message(role="agent", parts=[Part(type="text", text=f"Could not find event with ID '{event_id}' to update.")])
-        # Fail the A2A task
-        final_task = await task_manager.fail_task(task_id, agent_message)
-        return final_task
+        logger.warning(f"Event not found during update attempt, task_id={task_id}, event_id={event_id}")
+        raise InternalError(message=f"Could not find event with ID '{event_id}' to update.")
 
     except ConflictError as ce:
         # Handle potential conflicts if update_event starts checking them
         logger.warning("Conflict detected during event update", task_id=task_id, event_id=event_id, conflicts=ce.conflicts)
-        # Request input instead of failing
-        agent_message = Message(role="agent", parts=[Part(type="text", text=f"Update for event '{event_id}' failed due to scheduling conflicts. Please provide alternatives or cancel.")])
-        # Create artifact with conflict details
-        # Ensure conflict data is serializable (dicts are fine)
-        conflict_artifact = Artifact(name="scheduling_conflicts", parts=[Part(type="data", data=ce.conflicts)])
-        final_task = await task_manager.require_input_task(task_id, agent_message, conflict_artifact)
-        return final_task
+        raise ConflictError(message="Update for event failed due to scheduling conflicts. Please provide alternatives or cancel.", conflicts=ce.conflicts)
     except ValidationError as ve:
         # Handle Pydantic validation error for StructuredUpdatePayload or EventUpdate
         logger.warning("Invalid structured update payload received", task_id=task_id, validation_error=ve.errors())
@@ -93,14 +75,12 @@ async def handle_structured_update(
     except NotImplementedError as nie:
         # Handle unsupported updates (e.g., series time change)
         logger.exception("Unsupported update operation attempted", task_id=task_id, event_id=event_id, error=str(nie))
-        agent_message = Message(role="agent", parts=[Part(type="text", text=f"Failed to update event '{event_id}': {nie!s}")])
-        final_task = await task_manager.fail_task(task_id, agent_message)
-        return final_task
+        raise InternalError(message=f"Failed to update event '{event_id}': {nie!s}") from nie
     except ValueError as ve:
         # Handle other validation errors within update logic (e.g., missing instance times)
         # Use the event_id variable which is now guaranteed to exist (might be None)
         logger.exception("Value error during event update", task_id=task_id, event_id=event_id, error=str(ve))
-        agent_message = Message(role="agent", parts=[Part(type="text", text=f"Failed to update event '{event_id}': {ve!s}")])
+        raise InternalError(message=f"Failed to update event '{event_id}': {ve!s}") from ve
         final_task = await task_manager.fail_task(task_id, agent_message)
         return final_task
     except Exception as e:

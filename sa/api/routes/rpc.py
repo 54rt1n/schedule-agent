@@ -14,17 +14,10 @@ from sa.a2a.command import (
 )
 from sa.a2a.dto import (
     CancelTaskParams,
-    InternalError,
-    InvalidParamsError,
     JSONRPCRequest,
     JSONRPCResponse,
-    Message,
-    MethodNotFoundError,
-    Part,
     Task,
     TaskGetParams,
-    TaskNotCancelableError,
-    TaskNotFoundError,
     TaskSendParams,
 )
 from sa.api.dependencies import (
@@ -42,6 +35,20 @@ from sa.event.conflict_resolver import ConflictResolver
 from sa.event.date_utils import DateUtils
 from sa.event.exporters.base import CalendarExporter
 from sa.nlp.nlp_processor import NLPProcessor
+from sa.core.exceptions import (
+    DatabaseError, NLPError, ConflictError, ExporterError,
+    EventNotFoundError, TaskNotFoundError, CoreLogicError,
+)
+from sa.a2a.exceptions import (
+    BaseA2AError,
+    MethodNotFoundError as A2AMethodNotFoundError,
+    InvalidParamsError as A2AInvalidParamsError,
+    InternalError as A2AInternalError,
+    TaskNotFoundError as A2ATaskNotFoundError,
+    TaskNotCancelableError as A2ATaskNotCancelableError,
+    InvalidTaskStateError as A2AInvalidTaskStateError,
+    AgentCapabilityError as A2AAgentCapabilityError,
+)
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -72,7 +79,7 @@ async def handle_tasks_send(
         except Exception as e:
             # If task creation fails, we cannot proceed. Log and raise an internal error.
             logger.exception(f"Failed to create task {task_id} in handle_tasks_send", exc_info=e)
-            raise InternalError(f"Failed to initialize task state for task ID {task_id}")
+            raise A2AInternalError(f"Failed to initialize task state for task ID {task_id}")
     else:
         logger.debug(f"Task {task_id} already exists, proceeding with handling.")
 
@@ -89,14 +96,14 @@ async def handle_tasks_send(
     )
 
     if not message or not message.parts:
-        raise InvalidParamsError(message="Message with parts is required for tasks/send.")
+        raise A2AInvalidParamsError(message="Message with parts is required for tasks/send.")
 
     first_part = message.parts[0] # Access first part for type checking
 
     # --- Explicit check: Intent is required for structured data (type="data") ---
     if first_part.type == "data" and intent is None:
         logger.warning(f"Received structured data without an explicit intent for task_id={task_id}")
-        raise InvalidParamsError("An explicit 'intent' is required when sending structured data (type='data').")
+        raise A2AInvalidParamsError("An explicit 'intent' is required when sending structured data (type='data').")
     elif first_part.type == "text":
         logger.info(f"Routing text input to NLP handler for task_id={task_id}")
         return await handle_nlp_request(
@@ -110,18 +117,17 @@ async def handle_tasks_send(
         # 1. Ensure task exists for update
         existing_task = await task_manager.get_task(task_id)
         if not existing_task:
-            # If the task doesn't exist, we cannot update it. Fail immediately.
-            # This prevents the creation logic from running for an update intent.
             logger.warning(f"Task not found for update_event intent: task_id={task_id}")
-            # Raising TaskNotFoundError will be caught by the main handler
-            raise TaskNotFoundError(f"Task {task_id} not found, cannot process update.")
+            raise A2ATaskNotFoundError(f"Task {task_id} not found, cannot process update.")
 
-        # 2. Determine if structured or NLP update
-        # Use explicit flag first, then check part type as fallback
+        # 2. Call handler with correct arguments
         return await handle_structured_update(
-            task_id=task_id, input_data=first_part.data,
-            task_manager=task_manager, db_service=db_service,
-            conflict_resolver=conflict_resolver
+            task_id=task_id,
+            message=message, # Pass the full message object
+            task_manager=task_manager,
+            db_service=db_service,
+            conflict_resolver=conflict_resolver,
+            date_utils=date_utils # Pass date_utils dependency
         )
 
     elif intent == "create_event": 
@@ -146,7 +152,7 @@ async def handle_tasks_send(
         if not task:
             # Decide: should query create a task if not found, or fail? Let's assume fail for now.
             logger.warning(f"Task not found for query_events intent: task_id={task_id}")
-            raise TaskNotFoundError(f"Task {task_id} not found, cannot process query.")
+            raise A2ATaskNotFoundError(f"Task {task_id} not found, cannot process query.")
 
         return await handle_structured_query(
             task_id=task_id, message=message,
@@ -158,7 +164,7 @@ async def handle_tasks_send(
         task = await task_manager.get_task(task_id) # Ensure task exists
         if not task:
             logger.warning(f"Task not found for delete_event intent: task_id={task_id}")
-            raise TaskNotFoundError(f"Task {task_id} not found, cannot process delete.")
+            raise A2ATaskNotFoundError(f"Task {task_id} not found, cannot process delete.")
 
         return await handle_structured_delete(
             task_id=task_id, message=message, task_manager=task_manager, db_service=db_service
@@ -171,7 +177,7 @@ async def handle_tasks_send(
             # If intent=export_calendar but type=text, it should have been handled by handle_nlp_request.
             # If type is something else, it's an invalid request structure for this intent.
             logger.warning(f"Received export_calendar intent with non-data part type for task_id={task_id}")
-            raise InvalidParamsError("export_calendar intent requires structured data (type='data'). Text queries should not specify this intent.")
+            raise A2AInvalidParamsError("export_calendar intent requires structured data (type='data'). Text queries should not specify this intent.")
 
         logger.debug(f"Routing structured export_calendar request to handler for task_id={task_id}")
         return await handle_structured_export(
@@ -187,7 +193,7 @@ async def handle_tasks_send(
     else:
         # This handles cases where intent is not None, but not one of the handled elif conditions above
         logger.warning(f"Received unhandled explicit intent for task_id={task_id}: intent={intent}")
-        raise MethodNotFoundError(f"Intent '{intent}' is not supported by tasks/send.")
+        raise A2AMethodNotFoundError(f"Intent '{intent}' is not supported by tasks/send.")
 
 
 # Placeholder for actual task getting logic (Phase 2, Task 4)
@@ -200,7 +206,7 @@ async def handle_tasks_get(
     task = await task_manager.get_task(task_id=params.id)
     if task is None:
         logger.warning(f"Task not found during get request: task_id={params.id}")
-        raise TaskNotFoundError(f"Task with ID '{params.id}' not found.")
+        raise A2ATaskNotFoundError(f"Task with ID '{params.id}' not found.")
     return task
 
 
@@ -235,6 +241,7 @@ async def handle_rpc_request(
     request_id = rpc_request.id  # Store request id for response
 
     try:
+        # --- Method Routing ---
         if rpc_request.method == "tasks/send":
             parsed_params = TaskSendParams.model_validate(rpc_request.params or {})
             result_task = await handle_tasks_send(
@@ -259,55 +266,57 @@ async def handle_rpc_request(
             return JSONRPCResponse(id=request_id, result=result_task.model_dump())
 
         else:
-            # If method doesn't match any known method, raise MethodNotFoundError
             logger.warning(f"Unsupported RPC method requested: {rpc_request.method}")
-            raise MethodNotFoundError(f"Method '{rpc_request.method}' not found.")
-
-    # --- Specific A2A Error Handling --- # 
-    except MethodNotFoundError as e:
-        # Explicitly handle MethodNotFoundError first
-        logger.info(f"Method not found: '{e.message}', request_id={request_id}")
-        return JSONRPCResponse(id=request_id, error=e.as_jsonrpc_error())
-    
-    except (InvalidParamsError, TaskNotFoundError, TaskNotCancelableError) as e:
-        # Handle other known A2A application errors
-        logger.info(
-            f"A2A Application Error: error_type={type(e).__name__}, "
-            f"code={e.code}, message='{e.message}', request_id={request_id}"
-        )
-        return JSONRPCResponse(id=request_id, error=e.as_jsonrpc_error())
-
-    except ValidationError as ve:
-        # Handle Pydantic validation errors during param parsing *within this handler*
+            # Raise the *actual* exception now, not the DTO
+            raise A2AMethodNotFoundError(f"Method '{rpc_request.method}' not found.")
+    # These are already A2A errors, so we can raise them directly
+    except BaseA2AError as known_error:
+        raise known_error
+    # Handle known errors here, translate to A2A errors before raising
+    except ValidationError as validation_error:
         logger.warning(
-            f"Invalid parameters during handler validation: "
-            f"method={rpc_request.method}, error_summary={ve.errors(include_context=False)}, request_id={request_id}"
+            f"Caught Pydantic ValidationError within route: {validation_error}",
+            errors=validation_error.errors(),
         )
-        
-        error_data = None # Default to no data
-        if settings.include_validation_error_detail:
-            try:
-                # Safely create data payload ONLY if setting is True
-                error_data = {"details": ve.errors(include_context=False)}
-            except Exception as sanitization_error:
-                logger.exception(f"Failed to sanitize ValidationError details: {sanitization_error}", exc_info=sanitization_error)
-                error_data = {"details": "Failed to serialize validation error details."}
-        
-        err = InvalidParamsError(
-            message="Invalid parameters provided for method.", 
-            data=error_data # Pass potentially None data
+
+        raise A2AInvalidParamsError(
+            message=f"Invalid parameters for method execution: {validation_error.title}",
+            data=validation_error.errors()
         )
-        return JSONRPCResponse(id=request_id, error=err.as_jsonrpc_error())
-    
+    except EventNotFoundError as known_error:
+        raise A2AInvalidParamsError(message=known_error.message, data=known_error.data)
+    except TaskNotFoundError as known_error:
+        raise A2ATaskNotFoundError(message=known_error.message, data=known_error.data)
+    except DatabaseError as known_error:
+        raise A2AInternalError(message=known_error.message, data=known_error.data)
+    except NLPError as known_error:
+        raise A2AInternalError(message=known_error.message, data=known_error.data)
+    except ConflictError as known_error:
+        error_data = {
+            "details": "Scheduling conflict detected.",
+            "conflicts": [c["event"].model_dump(mode="json") for c in known_error.data if c.get("event")]
+        }
+        raise A2AInvalidParamsError(
+            message=known_error.message,
+            data=error_data
+        )
+    except ExporterError as known_error:
+        raise A2AInternalError(message=known_error.message, data=known_error.data)
+    except CoreLogicError as known_error:
+        raise A2AInternalError(message=known_error.message, data=known_error.data)
+    # Catch any other truly unexpected exception originating *within* this handler
     except Exception as e:
-        # Catch-all for unexpected errors within the RPC handlers
+        # Log the unexpected error
         logger.exception(
-            f"Unexpected internal error processing RPC request: method={rpc_request.method}, "
-            f"error_type={type(e).__name__}, error_message='{str(e)}', request_id={request_id}",
-            exc_info=e
+            f"Caught unexpected exception in RPC handler for method {rpc_request.method}: {e}",
+            exc_info=True
         )
-        internal_err = InternalError(
-            message="An unexpected internal server error occurred.",
-            data={"method": rpc_request.method, "error_type": type(e).__name__}
-        )
-        return JSONRPCResponse(id=request_id, error=internal_err.as_jsonrpc_error())
+        # Raise the A2AInternalError *exception*.
+        # This will be caught by the BaseA2AError handler in __main__.py
+        raise A2AInternalError(
+            message=f"Internal server error processing method {rpc_request.method}",
+            data={"error_type": type(e).__name__}
+        ) from e
+
+    # No need for the comment below anymore as the logic is handled above
+    # # Other exceptions propagate up to FastAPI handlers in __main__.py

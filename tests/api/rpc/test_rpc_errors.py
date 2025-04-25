@@ -1,19 +1,19 @@
 import pytest
 from fastapi.testclient import TestClient
-from ..conftest import build_rpc_request
+from unittest.mock import patch, AsyncMock
+import uuid
 
-# JSON-RPC Error Codes (as defined by JSON-RPC 2.0 spec)
-# https://www.jsonrpc.org/specification#error_object
-PARSE_ERROR = -32700      # Invalid JSON was received by the server. An error occurred on the server while parsing the JSON text.
-INVALID_REQUEST = -32600  # The JSON sent is not a valid Request object.
-METHOD_NOT_FOUND = -32601 # The method does not exist / is not available.
-INVALID_PARAMS = -32602   # Invalid method parameter(s).
-INTERNAL_ERROR = -32603   # Internal JSON-RPC error.
-# -32000 to -32099 are reserved for implementation-defined server-errors.
-TASK_NOT_FOUND = -32001
-TASK_NOT_CANCELABLE = -32002
-INVALID_TASK_STATE = -32003
-AGENT_CAPABILITY_ERROR = -32004
+from sa.a2a.exceptions import (
+    PARSE_ERROR, INVALID_REQUEST, METHOD_NOT_FOUND, INVALID_PARAMS, INTERNAL_ERROR, # Standard JSON-RPC codes
+    ParseError, InvalidRequestError, MethodNotFoundError, InvalidParamsError, InternalError,
+    TaskNotFoundError as A2ATaskNotFoundError # Import the correct A2A TaskNotFound error
+)
+from sa.core.exceptions import (
+    DatabaseError, NLPError, EventNotFoundError, TaskNotFoundError, CoreLogicError,
+    ConflictError, ExporterError,
+)
+
+from ..conftest import build_rpc_request
 
 def test_rpc_method_not_found(client: TestClient, auth_headers_valid: dict):
     """Test calling a non-existent RPC method."""
@@ -60,6 +60,31 @@ def test_rpc_invalid_params_structure(client: TestClient, auth_headers_valid: di
     # assert "field required" in str(response_data_missing_key["error"].get("data")).lower()
     assert response_data_missing_key["id"] == rpc_payload_missing_key["id"]
 
+def test_rpc_invalid_params_data_type(client: TestClient, auth_headers_valid: dict):
+    """
+    Test calling a known method (tasks/get) with parameters of the wrong data type
+    (e.g., sending an integer where a string ID is expected).
+    """
+    # tasks/get expects params: {"id": "string"}
+    rpc_payload = build_rpc_request("tasks/get", {"id": 12345}) # Send integer ID
+
+    # handle_rpc_request function should catch this before calling the specific handler.
+    response = client.post("/api/rpc", json=rpc_payload, headers=auth_headers_valid)
+
+    assert response.status_code == 200
+    response_data = response.json()
+    assert "error" in response_data
+    assert response_data["error"]["code"] == INVALID_PARAMS # -32602
+    assert "Invalid parameters" in response_data["error"]["message"]
+    assert response_data["id"] == rpc_payload["id"]
+
+    # Optionally, check the 'data' field if include_validation_error_detail=True in settings
+    # This requires accessing the app settings within the test, which can be tricky.
+    # For now, we focus on the error code and basic message.
+    # if client.app.state.settings.include_validation_error_detail:
+    #     assert "details" in response_data["error"]["data"]
+    #     assert "Input should be a valid string" in str(response_data["error"]["data"]["details"])
+
 def test_rpc_invalid_json(client: TestClient, auth_headers_valid: dict):
     """Test sending malformed JSON to the RPC endpoint."""
     invalid_json_string = '{"jsonrpc": "2.0", "method": "tasks/get", "params": {"id": "test"}, "id": 1, ]' # Extra comma
@@ -100,3 +125,129 @@ def test_rpc_invalid_request_structure(client: TestClient, auth_headers_valid: d
     assert "Invalid JSON-RPC request structure" in response_data["error"]["message"]
     # ID MUST be returned if it was present in the request, even for errors
     assert response_data["id"] == invalid_rpc_payload["id"] 
+
+# --- Exception Mapping Tests ---
+
+def test_rpc_exception_mapping_database_error(client: TestClient, auth_headers_valid: dict):
+    """Test that a DatabaseError raised by a handler maps to InternalError (-32603)."""
+    task_id = "task-db-error"
+    error_message = "Simulated DB connection failure"
+
+    with patch("sa.api.routes.rpc.handle_tasks_get", new_callable=AsyncMock) as mock_handler:
+        # Patch the *core* exception TaskNotFoundError from sa.core.exceptions if handle_tasks_get raises it
+        # Or patch the A2A exception if handle_tasks_get raises that directly (depends on implementation)
+        mock_handler.side_effect = DatabaseError(error_message, data={"taskId": task_id}) # Pass data here
+        rpc_payload = build_rpc_request("tasks/get", {"id": task_id})
+        response = client.post("/api/rpc", json=rpc_payload, headers=auth_headers_valid)
+
+    assert response.status_code == 200
+    response_data = response.json()
+    assert "error" in response_data
+    assert response_data.get("result") is None
+
+    error_payload = response_data["error"]
+    assert error_payload["code"] == INTERNAL_ERROR # -32603
+    # Check that the message is the *specific* message from the original exception
+    assert error_payload["message"] == error_message
+    # Check that the data is passed correctly
+    assert error_payload["data"] is not None
+    assert error_payload["data"]["taskId"] == task_id
+    mock_handler.assert_awaited_once()
+
+def test_rpc_exception_mapping_nlp_error(client: TestClient, auth_headers_valid: dict):
+    """Test that an NLPError raised by a handler maps to InternalError (-32603)."""
+    task_id = "task-nlp-error"
+    error_message = "Simulated LLM API failure"
+    send_params = {
+        "id": task_id,
+        "message": {
+            "role": "user",
+            "parts": [{"type": "text", "text": "Schedule a meeting"}]
+        }
+    }
+    rpc_payload = build_rpc_request("tasks/send", send_params)
+
+    # Decide which handler to patch based on the actual flow for NLP errors
+    # If handle_tasks_send calls handle_nlp_request and *that* raises NLPError:
+    with patch("sa.api.routes.rpc.handle_nlp_request", new_callable=AsyncMock) as mock_handler:
+        mock_handler.side_effect = NLPError(error_message, data={"taskId": task_id}) # Pass data
+        response = client.post("/api/rpc", json=rpc_payload, headers=auth_headers_valid)
+
+    assert response.status_code == 200
+    response_data = response.json()
+    assert "error" in response_data
+    assert response_data.get("result") is None
+
+    error_payload = response_data["error"]
+    assert error_payload["code"] == INTERNAL_ERROR # -32603
+    # Check that the message is the *specific* message from the original exception
+    assert error_payload["message"] == error_message
+    # Check that the data is passed correctly
+    assert error_payload["data"] is not None
+    assert error_payload["data"]["taskId"] == task_id
+    mock_handler.assert_awaited_once()
+
+def test_rpc_exception_mapping_generic_exception(client: TestClient, auth_headers_valid: dict):
+    """Test that a generic Exception raised by a handler maps to InternalError (-32603)."""
+    task_id = "task-generic-error"
+    error_message = "Something unexpected happened!" # This specific message won't appear
+
+    with patch("sa.api.routes.rpc.handle_tasks_get", new_callable=AsyncMock) as mock_handler:
+        mock_handler.side_effect = Exception(error_message)
+        rpc_payload = build_rpc_request("tasks/get", {"id": task_id})
+        response = client.post("/api/rpc", json=rpc_payload, headers=auth_headers_valid)
+
+    assert response.status_code == 200
+    response_data = response.json()
+    assert "error" in response_data
+    assert response_data.get("result") is None
+
+    error_payload = response_data["error"]
+    assert error_payload["code"] == INTERNAL_ERROR # -32603
+    # Check the generic message from the A2AInternalError raised in the handler
+    assert error_payload["message"] == f"Internal server error processing method tasks/get"
+    # Check the data added by the generic handler in rpc.py
+    assert error_payload["data"] is not None
+    assert error_payload["data"]["error_type"] == "Exception"
+    # Note: The generic handler in __main__.py might add different/more data if the exception propagates there
+    # assert error_payload["data"]["taskId"] == task_id # task_id might not be available here depending on handler
+    mock_handler.assert_awaited_once()
+
+def test_rpc_exception_mapping_a2a_from_handler(client: TestClient, auth_headers_valid: dict):
+    """Test that a specific BaseA2AError (TaskNotFound) maps correctly."""
+    task_id = "task-a2a-error"
+    event_id = str(uuid.uuid4())
+    # Using A2ATaskNotFoundError now
+    error_message = f"Task {task_id} not found for update"
+    update_payload = {
+        "event_id": event_id,
+        "update_data": {"title": "New Title"}
+    }
+    send_params = {
+        "id": task_id,
+        "intent": "update_event",
+        "message": {
+            "role": "user",
+            "parts": [{"type": "data", "data": update_payload}]
+        }
+    }
+    rpc_payload = build_rpc_request("tasks/send", send_params)
+
+    # Patch the handler that is expected to raise the A2A error
+    with patch("sa.api.routes.rpc.handle_structured_update", new_callable=AsyncMock) as mock_handler:
+        # Raise the *A2A* specific exception directly
+        mock_handler.side_effect = A2ATaskNotFoundError(error_message) # No data needed for this test case
+        response = client.post("/api/rpc", json=rpc_payload, headers=auth_headers_valid)
+
+    assert response.status_code == 200
+    response_data = response.json()
+    assert "error" in response_data
+    assert response_data.get("result") is None
+
+    error_payload = response_data["error"]
+    # Use the correct A2A exception class to get the default code
+    assert error_payload["code"] == A2ATaskNotFoundError.DEFAULT_CODE # -32001
+    assert error_payload["message"] == error_message # Check exact message
+    # A2A TaskNotFoundError doesn't add data by default, so check it's None or absent
+    assert error_payload.get("data") is None
+    mock_handler.assert_awaited_once() 

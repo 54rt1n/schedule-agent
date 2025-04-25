@@ -7,18 +7,22 @@ from fastapi.exceptions import RequestValidationError  # Import for handling 422
 from fastapi.responses import JSONResponse
 import json
 from typing import Any
+from pydantic import ValidationError # Import Pydantic's ValidationError
 
 from sa.a2a.dto import (
-    BaseA2AError,
-    InternalError,
-    InvalidRequestError,
-    JSONRPCResponse as A2AJSONRPCResponse,  # Avoid naming conflict with fastapi.responses.JSONResponse
-    ParseError,
+    JSONRPCResponse as A2AJSONRPCResponse,
+    JSONRPCError # Needed for manual construction if required
 )
-from sa.a2a.task_manager import SchedulingTaskManager
-from sa.api.middleware.auth import APIKeyAuthMiddleware
-from sa.api.routes import rpc, well_known
-from sa.core.exceptions import NLPError, DatabaseError
+from sa.a2a.exceptions import (
+    BaseA2AError,
+    InternalError as A2AInternalError,
+    InvalidParamsError as A2AInvalidParamsError,
+    InvalidRequestError as A2AInvalidRequestError,
+    ParseError as A2AParseError
+)
+from sa.core.exceptions import (
+    CoreLogicError, DatabaseError
+)
 from sa.core.logging_config import get_logger, setup_logging
 from sa.core.settings import Settings
 from sa.db.service import DatabaseService
@@ -28,6 +32,9 @@ from sa.event.exporters.ical_exporter import ICalExporter
 from sa.event.exporters.orgmode_exporter import OrgModeExporter
 from sa.nlp.llm_provider import LLMProvider
 from sa.nlp.nlp_processor import NLPProcessor
+from sa.a2a.task_manager import SchedulingTaskManager
+from sa.api.middleware.auth import APIKeyAuthMiddleware
+from sa.api.routes import rpc, well_known
 
 logger = get_logger(__name__)
 
@@ -140,66 +147,23 @@ def main(settings: Settings) -> FastAPI:
     # --- Add Middleware ---
     app.add_middleware(APIKeyAuthMiddleware)
 
+    # --- Specific Exception Handlers --- 
+
+    # Catch all A2A-defined errors inheriting from BaseA2AError
     @app.exception_handler(BaseA2AError)
-    async def a2a_exception_handler(request: Request, exc: Exception):
-        """Handles known A2AErrors raised from within route handlers."""
+    async def a2a_exception_handler(request: Request, exc: BaseA2AError):
         logger.warning(
-            f"Caught known A2A exception: {type(exc).__name__}",
-            exc_info=exc, # Log the full exception details at warning level
-            request_url=request.url.path,
-            error_code=exc.code,
-            error_message=exc.message,
+            f"Caught A2A exception: {type(exc).__name__} code={exc.code} msg='{exc.message}'",
+            request_url=request.url.path
         )
-        # Attempt to get request_id, but don't fail if body is consumed
         request_id, _ = await _get_request_details(request)
-
-        # Use the error's built-in method to get the JSON-RPC error object
-        rpc_error = exc.as_jsonrpc_error()
-
-        return JSONResponse(
-            status_code=200, # JSON-RPC uses 200 OK for errors
-            content=A2AJSONRPCResponse(id=request_id, error=rpc_error).model_dump(
-                exclude_none=True
-            ),
-        )
-
-    @app.exception_handler(DatabaseError)
-    async def database_exception_handler(request: Request, exc: DatabaseError):
-        logger.exception("Unhandled DatabaseError caught", exc_info=exc, request_url=request.url.path)
-        request_id, params = await _get_request_details(request)
-        task_id = params.get("id") if isinstance(params, dict) else None
-        # Map to A2A InternalError
-        error_data = {"taskId": task_id, "details": str(exc)}
-        a2a_error = InternalError(message="An internal database error occurred.", data=error_data)
-        # Use the new A2A handler's logic for response generation
-        rpc_error = a2a_error.as_jsonrpc_error()
+        rpc_error_dto = exc.as_jsonrpc_error()
         return JSONResponse(
             status_code=200,
-            content=A2AJSONRPCResponse(id=request_id, error=rpc_error).model_dump(
-                exclude_none=True
-            ),
+            content=A2AJSONRPCResponse(id=request_id, error=rpc_error_dto).model_dump(exclude_none=True)
         )
 
-
-    @app.exception_handler(NLPError)
-    async def nlp_exception_handler(request: Request, exc: NLPError):
-        logger.exception("Unhandled NLPError caught", exc_info=exc, request_url=request.url.path)
-        request_id, params = await _get_request_details(request)
-        task_id = params.get("id") if isinstance(params, dict) else None
-        # Map to A2A InternalError
-        error_data = {"taskId": task_id, "details": str(exc)}
-        a2a_error = InternalError(message="An internal NLP processing error occurred.", data=error_data)
-        # Use the new A2A handler's logic for response generation
-        rpc_error = a2a_error.as_jsonrpc_error()
-        return JSONResponse(
-            status_code=200,
-            content=A2AJSONRPCResponse(id=request_id, error=rpc_error).model_dump(
-                exclude_none=True
-            ),
-        )
-
-
-    # Handler for FastAPI's validation errors (e.g., invalid JSON, missing required fields in body)
+    # Handler for FastAPI's RequestValidationError (Raised *before* route -> A2A ParseError/InvalidRequestError)
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
         # This handler catches errors during request validation *before* the route handler is called.
@@ -237,9 +201,7 @@ def main(settings: Settings) -> FastAPI:
 
         # Now determine the correct JSON-RPC error based on validation details
         if is_json_decode_error:
-            # If JSON itself is invalid, it's definitely a ParseError
-            a2a_error = ParseError(message="Failed to parse JSON request.")
-            # ID is likely None or garbage here, default to None
+            a2a_exc = A2AParseError(message="Failed to parse JSON request.")
             request_id = None
         else:
             error_details = exc.errors()
@@ -251,7 +213,7 @@ def main(settings: Settings) -> FastAPI:
 
             if is_invalid_rpc_structure:
                 # Missing or invalid top-level JSON-RPC fields (method, jsonrpc)
-                a2a_error = InvalidRequestError(
+                a2a_exc = A2AInvalidRequestError(
                     message="Invalid JSON-RPC request structure (e.g., missing 'method' or invalid 'jsonrpc').",
                     data=error_details,
                 )
@@ -259,7 +221,7 @@ def main(settings: Settings) -> FastAPI:
                 # Other validation errors (e.g., type errors in top-level fields like 'id', general structure issues)
                 # These indicate the request couldn't be parsed into a valid JSONRPCRequest *object*.
                 # Map these to ParseError according to A2A spec (failure to parse the request).
-                a2a_error = ParseError(
+                a2a_exc = A2AParseError(
                     message="Failed to parse request into valid JSON-RPC structure (e.g., invalid field type).",
                     data=error_details,
                 )
@@ -268,15 +230,14 @@ def main(settings: Settings) -> FastAPI:
         if request_id is None:
             logger.warning("Could not determine request ID during ParseError handling.")
 
+        # Check if these DTOs have as_jsonrpc_error or build manually
+        rpc_error_dto = a2a_exc.as_jsonrpc_error() # Assuming they have it
         return JSONResponse(
-            status_code=200,  # Use 200 for JSON-RPC errors
-            content=A2AJSONRPCResponse(id=request_id, error=a2a_error.as_jsonrpc_error()).model_dump(
-                exclude_none=True
-            ),
+            status_code=200,
+            content=A2AJSONRPCResponse(id=request_id, error=rpc_error_dto).model_dump(exclude_none=True)
         )
 
-
-    # Generic fallback handler
+    # Generic fallback handler (Generic Exception -> A2A InternalError)
     @app.exception_handler(Exception)
     async def generic_exception_handler(request: Request, exc: Exception):
         """Handles any other unexpected exceptions not caught by specific handlers."""
@@ -291,17 +252,12 @@ def main(settings: Settings) -> FastAPI:
         # Create a standard A2A InternalError response
         # Avoid exposing raw exception details unless necessary/configured
         error_data = {"taskId": task_id, "details": "An unexpected server error occurred."}
-        a2a_error = InternalError(message="Internal server error", data=error_data)
-        rpc_error = a2a_error.as_jsonrpc_error()
+        a2a_exc = A2AInternalError(message="Internal server error", data=error_data)
+        rpc_error_dto = a2a_exc.as_jsonrpc_error()
 
         return JSONResponse(
             status_code=200, # JSON-RPC still uses 200 OK
-            content=A2AJSONRPCResponse(id=request_id, error=rpc_error).model_dump(
-                exclude_none=True
-            ),
-            # Potentially set status_code=500 if you want to distinguish transport errors
-            # from application errors, but A2A spec typically uses 200 for RPC errors.
-            # status_code=500,
+            content=A2AJSONRPCResponse(id=request_id, error=rpc_error_dto).model_dump(exclude_none=True)
         )
 
     # --- Routers ---
@@ -319,7 +275,6 @@ def main(settings: Settings) -> FastAPI:
 if __name__ == "__main__":
     import uvicorn
     settings = Settings()
-
 
     # Call main to get the app and settings
     app = main(settings)

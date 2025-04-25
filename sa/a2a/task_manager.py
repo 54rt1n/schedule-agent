@@ -13,7 +13,7 @@ from sa.a2a.dto import (
     TaskState,
     TaskStatus,
 )
-from sa.core.exceptions import TaskNotFoundError, TaskNotCancelableError
+from sa.a2a.exceptions import TaskNotFoundError, TaskNotCancelableError
 from sa.core.logging_config import get_logger
 from sa.db.models import A2ATask
 from sa.db.service import DatabaseService
