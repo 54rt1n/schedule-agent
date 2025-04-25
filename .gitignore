@@ -143,9 +143,6 @@ schedule_agent.db-journal
 schedule_agent.db-wal
 schedule_agent.db-shm
 
-# Alembic
-alembic.ini
-alembic/ 
 files.txt
 vendor/
 local/

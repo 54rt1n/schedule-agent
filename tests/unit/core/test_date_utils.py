@@ -4,8 +4,11 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from scheduling_agent.core.date_utils import DateUtils
-from scheduling_agent.db.models import Event, ExcludedDate
+from sa.core.logging_config import get_logger
+from sa.event.date_utils import DateUtils
+from sa.db.models import Event, ExcludedDate, ModifiedInstance
+
+logger = get_logger(__name__)
 
 
 @pytest.fixture
@@ -99,8 +102,6 @@ def test_convert_from_utc_invalid_tz(date_utils: DateUtils):
 
 
 # --- Recurrence Expansion Tests ---
-
-
 def test_expand_recurrence_simple_weekly(date_utils: DateUtils):
     """Test expanding a simple weekly recurrence rule."""
     # Event: Weekly on Monday at 9am UTC for 5 weeks
@@ -117,9 +118,6 @@ def test_expand_recurrence_simple_weekly(date_utils: DateUtils):
         "rrule": rrule_str,
         # No excluded_dates or modified_instances needed for this test
     }
-    # Use model_validate for creating test instance from dict
-    # Need to import Event from db models for this
-    from scheduling_agent.db.models import Event
 
     base_event = Event.model_validate(base_event_data)
 
@@ -128,12 +126,17 @@ def test_expand_recurrence_simple_weekly(date_utils: DateUtils):
     range_end = datetime(2024, 6, 10, 0, 0, 0, tzinfo=UTC)
 
     # --- Act ---
-    # Assume expand_recurrence takes base event, range, and optional exceptions
-    # For this test, exceptions are empty lists
     # Let's assume expand_recurrence returns a list of simple dicts or EventRead models
     # for now, not full Event DB models, to represent the expanded occurrences.
     occurrences = date_utils.expand_recurrence(
-        base_event=base_event,
+        rrule_str=rrule_str,
+        base_event_id=base_event.id,
+        base_start_naive_utc=start_dt,
+        base_end_naive_utc=end_dt,
+        base_title=base_event.title,
+        base_location=base_event.location,
+        base_notes=base_event.notes,
+        base_timezone=base_event.time_zone,
         range_start_utc=range_start,
         range_end_utc=range_end,
         excluded_dates=[],
@@ -196,7 +199,14 @@ def test_expand_recurrence_with_exclusion(date_utils: DateUtils):
 
     # Act
     occurrences = date_utils.expand_recurrence(
-        base_event=base_event,
+        rrule_str=rrule_str,
+        base_event_id=base_event.id,
+        base_start_naive_utc=start_dt,
+        base_end_naive_utc=end_dt,
+        base_title=base_event.title,
+        base_location=base_event.location,
+        base_notes=base_event.notes,
+        base_timezone=base_event.time_zone,
         range_start_utc=range_start,
         range_end_utc=range_end,
         excluded_dates=excluded,
@@ -240,9 +250,6 @@ def test_expand_recurrence_with_modification(date_utils: DateUtils):
     mod_title = "Modified Weekly"
     mod_location = "Virtual"
 
-    # Need ModifiedInstance model
-    from scheduling_agent.db.models import ModifiedInstance
-
     modified = [
         ModifiedInstance(
             event_id=base_event.id,
@@ -260,7 +267,14 @@ def test_expand_recurrence_with_modification(date_utils: DateUtils):
 
     # Act
     occurrences = date_utils.expand_recurrence(
-        base_event=base_event,
+        rrule_str=rrule_str,
+        base_event_id=base_event.id,
+        base_start_naive_utc=start_dt,
+        base_end_naive_utc=end_dt,
+        base_title=base_event.title,
+        base_location=base_event.location,
+        base_notes=base_event.notes,
+        base_timezone=base_event.time_zone,
         range_start_utc=range_start,
         range_end_utc=range_end,
         excluded_dates=[],
@@ -322,7 +336,14 @@ def test_expand_recurrence_until(date_utils: DateUtils):
 
     # Act
     occurrences = date_utils.expand_recurrence(
-        base_event=base_event,
+        rrule_str=rrule_str,
+        base_event_id=base_event.id,
+        base_start_naive_utc=start_dt,
+        base_end_naive_utc=end_dt,
+        base_title=base_event.title,
+        base_location=base_event.location,
+        base_notes=base_event.notes,
+        base_timezone=base_event.time_zone,
         range_start_utc=range_start,
         range_end_utc=range_end,
         excluded_dates=[],
@@ -351,7 +372,8 @@ def test_expand_recurrence_bysetpos(date_utils: DateUtils):
     )  # Initial start must be a valid instance (last Fri of Aug)
     end_dt = datetime(2024, 8, 30, 15, 0, 0, tzinfo=UTC)
     # Last Friday of the month
-    rrule_str = "FREQ=MONTHLY;BYDAY=FR;BYSETPOS=-1"
+    # Add COUNT=3 to make the rule bounded for the test range
+    rrule_str = "FREQ=MONTHLY;BYDAY=FR;BYSETPOS=-1;COUNT=3"
     base_event = Event.model_validate(
         {
             "id": uuid.uuid4(),
@@ -369,7 +391,14 @@ def test_expand_recurrence_bysetpos(date_utils: DateUtils):
 
     # Act
     occurrences = date_utils.expand_recurrence(
-        base_event=base_event,
+        rrule_str=rrule_str,
+        base_event_id=base_event.id,
+        base_start_naive_utc=start_dt,
+        base_end_naive_utc=end_dt,
+        base_title=base_event.title,
+        base_location=base_event.location,
+        base_notes=base_event.notes,
+        base_timezone=base_event.time_zone,
         range_start_utc=range_start,
         range_end_utc=range_end,
         excluded_dates=[],
@@ -493,7 +522,14 @@ def test_expand_recurrence_dst_transitions(
 
     # Act
     occurrences = date_utils.expand_recurrence(
-        base_event=base_event,
+        rrule_str=rrule_str,
+        base_event_id=base_event.id,
+        base_start_naive_utc=start_naive_utc,
+        base_end_naive_utc=end_naive_utc,
+        base_title=base_event.title,
+        base_location=base_event.location,
+        base_notes=base_event.notes,
+        base_timezone=base_event.time_zone,
         range_start_utc=range_start_utc,
         range_end_utc=range_end_utc,
         excluded_dates=[],
@@ -553,7 +589,14 @@ def test_expand_recurrence_dst_with_exclusion(date_utils: DateUtils):
 
     # Act
     occurrences = date_utils.expand_recurrence(
-        base_event=base_event,
+        rrule_str=rrule_str,
+        base_event_id=base_event.id,
+        base_start_naive_utc=start_naive_utc,
+        base_end_naive_utc=end_naive_utc,
+        base_title=base_event.title,
+        base_location=base_event.location,
+        base_notes=base_event.notes,
+        base_timezone=base_event.time_zone,
         range_start_utc=range_start_utc,
         range_end_utc=range_end_utc,
         excluded_dates=excluded,
@@ -612,9 +655,6 @@ def test_expand_recurrence_dst_with_modification(date_utils: DateUtils):
     mod_end_local = mod_start_local + event_duration
     mod_title = "Modified DST Event"
 
-    # Need ModifiedInstance model
-    from scheduling_agent.db.models import ModifiedInstance
-
     modified = [
         ModifiedInstance(
             event_id=base_event.id,
@@ -632,7 +672,14 @@ def test_expand_recurrence_dst_with_modification(date_utils: DateUtils):
 
     # Act
     occurrences = date_utils.expand_recurrence(
-        base_event=base_event,
+        rrule_str=rrule_str,
+        base_event_id=base_event.id,
+        base_start_naive_utc=start_naive_utc,
+        base_end_naive_utc=end_naive_utc,
+        base_title=base_event.title,
+        base_location=base_event.location,
+        base_notes=base_event.notes,
+        base_timezone=base_event.time_zone,
         range_start_utc=range_start_utc,
         range_end_utc=range_end_utc,
         excluded_dates=[],

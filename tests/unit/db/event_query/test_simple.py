@@ -1,71 +1,127 @@
 from datetime import UTC, datetime, timedelta
-
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Dict, Any
 
-from scheduling_agent.db.schemas import EventCreate
-from scheduling_agent.db.service import DatabaseService
+from sa.core.logging_config import get_logger
+from sa.db.models import Event
+from sa.db.dao import EventCreate
+from sa.db.service import DatabaseService
+from sa.event.date_utils import DateUtils
+from sa.db.strategies.get_events_in_range import GetEventsInRangeStrategy
+from sa.db.dao import TimeRange
 
-# Tests for simple event queries (get_events_in_range)
+logger = get_logger(__name__)
+
+# Helper function adapted for integration tests
+async def create_test_event_for_query(
+    db_service: DatabaseService,
+    data: dict,
+    date_utils: DateUtils
+) -> Event:
+    """Helper to create event for query tests using db_service."""
+    start_naive_local = data.get("start_time")
+    end_naive_local = data.get("end_time")
+    tz_name = data.get("time_zone", "UTC")
+    if not start_naive_local or not end_naive_local: raise ValueError("start/end required")
+
+    # Convert input times (assumed naive local) to naive UTC for storage
+    start_aware_utc = date_utils.normalize_to_utc(start_naive_local, tz_name=tz_name)
+    end_aware_utc = date_utils.normalize_to_utc(end_naive_local, tz_name=tz_name)
+    start_naive_utc = start_aware_utc.replace(tzinfo=None)
+    end_naive_utc = end_aware_utc.replace(tzinfo=None)
+
+    event_data_for_model = data.copy()
+    event_data_for_model["start_time"] = start_naive_utc
+    event_data_for_model["end_time"] = end_naive_utc
+    event_data_for_model["time_zone"] = tz_name
+
+    # Import Event model here to avoid potential top-level circular issues
+    event = Event(**event_data_for_model)
+
+    # Use db_service session manager to add and commit
+    async with db_service.get_session() as session:
+        session.add(event)
+        await session.commit() # Commit within the helper session
+        await session.refresh(event) # Refresh to get ID etc.
+    return event
 
 @pytest.mark.asyncio
-async def test_get_events_in_range_simple(db_service: DatabaseService, test_session: AsyncSession):
-    """Test retrieving simple, non-recurring events within a date range."""
+async def test_get_events_in_range_simple(
+    db_service: DatabaseService,
+    date_utils: DateUtils,
+    initialize_db: None
+):
+    """Test retrieving simple, non-recurring events using the strategy."""
     # --- Arrange ---
-    evt1_start = datetime(2024, 8, 15, 10, 0, 0)
-    evt1_end = datetime(2024, 8, 15, 11, 0, 0)
-    evt2_start = datetime(2024, 8, 20, 14, 0, 0)
-    evt2_end = datetime(2024, 8, 20, 15, 0, 0)
-    evt3_start = datetime(2024, 8, 10, 12, 0, 0)
-    evt3_end = datetime(2024, 8, 10, 13, 0, 0)
-    evt4_start = datetime(2024, 8, 25, 16, 0, 0)
-    evt4_end = datetime(2024, 8, 25, 17, 0, 0)
-    evt5_start = datetime(2024, 8, 14, 23, 0, 0)
-    evt5_end = datetime(2024, 8, 15, 1, 0, 0)
-    evt6_start = datetime(2024, 8, 20, 23, 0, 0)
-    evt6_end = datetime(2024, 8, 21, 1, 0, 0)
-    evt7_start = datetime(2024, 8, 12, 10, 0, 0)
-    evt7_end = datetime(2024, 8, 22, 10, 0, 0)
+    evt1_start = datetime(2024, 8, 15, 10, 0, 0, tzinfo=UTC)
+    evt1_end = datetime(2024, 8, 15, 11, 0, 0, tzinfo=UTC)
+    evt2_start = datetime(2024, 8, 20, 14, 0, 0, tzinfo=UTC)
+    evt2_end = datetime(2024, 8, 20, 15, 0, 0, tzinfo=UTC)
+    evt3_start = datetime(2024, 8, 10, 12, 0, 0, tzinfo=UTC)
+    evt3_end = datetime(2024, 8, 10, 13, 0, 0, tzinfo=UTC)
+    evt4_start = datetime(2024, 8, 25, 16, 0, 0, tzinfo=UTC)
+    evt4_end = datetime(2024, 8, 25, 17, 0, 0, tzinfo=UTC)
+    evt5_start = datetime(2024, 8, 14, 23, 0, 0, tzinfo=UTC)
+    evt5_end = datetime(2024, 8, 15, 1, 0, 0, tzinfo=UTC)
+    evt6_start = datetime(2024, 8, 20, 23, 0, 0, tzinfo=UTC)
+    evt6_end = datetime(2024, 8, 21, 1, 0, 0, tzinfo=UTC)
+    evt7_start = datetime(2024, 8, 12, 10, 0, 0, tzinfo=UTC)
+    evt7_end = datetime(2024, 8, 22, 10, 0, 0, tzinfo=UTC)
 
     events_data = [
-        EventCreate(title="Evt1", start_time=evt1_start, end_time=evt1_end, time_zone="UTC"),
-        EventCreate(title="Evt2", start_time=evt2_start, end_time=evt2_end, time_zone="UTC"),
-        EventCreate(title="Evt3", start_time=evt3_start, end_time=evt3_end, time_zone="UTC"),
-        EventCreate(title="Evt4", start_time=evt4_start, end_time=evt4_end, time_zone="UTC"),
-        EventCreate(title="Evt5", start_time=evt5_start, end_time=evt5_end, time_zone="UTC"),
-        EventCreate(title="Evt6", start_time=evt6_start, end_time=evt6_end, time_zone="UTC"),
-        EventCreate(title="Evt7", start_time=evt7_start, end_time=evt7_end, time_zone="UTC"),
+        EventCreate(title="Evt1", start_time=evt1_start.replace(tzinfo=None), end_time=evt1_end.replace(tzinfo=None), time_zone="UTC"),
+        EventCreate(title="Evt2", start_time=evt2_start.replace(tzinfo=None), end_time=evt2_end.replace(tzinfo=None), time_zone="UTC"),
+        EventCreate(title="Evt3", start_time=evt3_start.replace(tzinfo=None), end_time=evt3_end.replace(tzinfo=None), time_zone="UTC"),
+        EventCreate(title="Evt4", start_time=evt4_start.replace(tzinfo=None), end_time=evt4_end.replace(tzinfo=None), time_zone="UTC"),
+        EventCreate(title="Evt5", start_time=evt5_start.replace(tzinfo=None), end_time=evt5_end.replace(tzinfo=None), time_zone="UTC"),
+        EventCreate(title="Evt6", start_time=evt6_start.replace(tzinfo=None), end_time=evt6_end.replace(tzinfo=None), time_zone="UTC"),
+        EventCreate(title="Evt7", start_time=evt7_start.replace(tzinfo=None), end_time=evt7_end.replace(tzinfo=None), time_zone="UTC"),
     ]
-    for data in events_data:
-        await db_service.create_event(event_data=data)
+    # Create events using the helper and real db_service
+    for data_obj in events_data:
+        # Convert EventCreate to dict before passing to helper
+        await create_test_event_for_query(db_service, data_obj.model_dump(), date_utils)
 
     range_start = datetime(2024, 8, 15, 0, 0, 0)
     range_end = datetime(2024, 8, 21, 0, 0, 0)
-
-    # --- Act ---
     range_start_aware = range_start.replace(tzinfo=UTC)
     range_end_aware = range_end.replace(tzinfo=UTC)
-    retrieved_events = await db_service.get_events_in_range(
-        start=range_start_aware, end=range_end_aware
+
+    # Instantiate the strategy using the real db_service
+    strategy = GetEventsInRangeStrategy(
+        db_service=db_service,
+        date_utils=date_utils
     )
+    strategy_input: TimeRange = (range_start_aware, range_end_aware)
+
+    # --- Act ---
+    # Execute the strategy
+    retrieved_events = await strategy.execute(data=strategy_input)
 
     # --- Assert ---
     assert len(retrieved_events) == 5
     retrieved_titles = sorted([evt.title for evt in retrieved_events])
     assert retrieved_titles == sorted(["Evt1", "Evt2", "Evt5", "Evt6", "Evt7"])
 
-
 @pytest.mark.asyncio
-async def test_get_events_in_range_empty(db_service: DatabaseService):
-    """Test get_events_in_range returns empty list when no events are in range."""
+async def test_get_events_in_range_empty(
+    db_service: DatabaseService,
+    date_utils: DateUtils,
+    initialize_db: None
+):
+    """Test strategy returns empty list when no events are in range."""
     # --- Arrange ---
     range_start_aware = datetime(2024, 11, 1, 0, 0, 0, tzinfo=UTC)
     range_end_aware = datetime(2024, 11, 10, 0, 0, 0, tzinfo=UTC)
 
-    # --- Act ---
-    retrieved_events = await db_service.get_events_in_range(
-        start=range_start_aware, end=range_end_aware
+    strategy = GetEventsInRangeStrategy(
+        db_service=db_service,
+        date_utils=date_utils
     )
+    strategy_input = (range_start_aware, range_end_aware)
+
+    # --- Act ---
+    retrieved_events = await strategy.execute(data=strategy_input)
 
     # --- Assert ---
     assert retrieved_events == []
@@ -116,36 +172,44 @@ QUERY_RANGE_END = datetime(2024, 10, 15, 11, 0, 0, tzinfo=UTC) # 1 hour duration
 )
 async def test_get_events_in_range_simple_boundaries(
     db_service: DatabaseService,
+    date_utils: DateUtils,
+    initialize_db: None,
     test_id: str,
     event_start_offset: timedelta,
     event_end_offset: timedelta,
     expected_count: int,
     expected_title_part: str | None,
 ):
-    """Test get_events_in_range for simple events against various boundary conditions."""
+    """Test GetEventsInRangeStrategy for simple event boundaries."""
     # --- Arrange ---
     event_title = f"Event {test_id}"
     event_start = QUERY_RANGE_START + event_start_offset
     event_end = QUERY_RANGE_START + event_end_offset
 
-    # Ensure start/end are aware UTC datetimes
-    event_start = event_start.replace(tzinfo=UTC) if event_start.tzinfo is None else event_start.astimezone(UTC)
-    event_end = event_end.replace(tzinfo=UTC) if event_end.tzinfo is None else event_end.astimezone(UTC)
+    # Ensure start/end are naive UTC for EventCreate via helper
+    event_start_naive = event_start.replace(tzinfo=None)
+    event_end_naive = event_end.replace(tzinfo=None)
 
-    event_data = EventCreate(
-        title=event_title,
-        start_time=event_start,
-        end_time=event_end,
-        time_zone="UTC", # Using UTC for simplicity in boundary tests
-    )
-    created_event = await db_service.create_event(event_data=event_data)
+    event_data = {
+        "title": event_title,
+        "start_time": event_start_naive,
+        "end_time": event_end_naive,
+        "time_zone": "UTC",
+    }
+    # Create event using helper
+    created_event = await create_test_event_for_query(db_service, event_data, date_utils)
+    # Commit happened inside helper
     assert created_event is not None
     assert created_event.title == event_title
 
-    # --- Act ---
-    retrieved_events = await db_service.get_events_in_range(
-        start=QUERY_RANGE_START, end=QUERY_RANGE_END
+    strategy = GetEventsInRangeStrategy(
+        db_service=db_service,
+        date_utils=date_utils
     )
+    strategy_input: TimeRange = (QUERY_RANGE_START, QUERY_RANGE_END)
+
+    # --- Act ---
+    retrieved_events = await strategy.execute(data=strategy_input)
 
     # --- Assert ---
     assert len(retrieved_events) == expected_count, (

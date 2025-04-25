@@ -2,14 +2,10 @@ import os
 
 import pytest
 
-# Assuming openai might not be installed in all test environments
-try:
-    import openai
-except ImportError:
-    openai = None
+import openai
 
-from scheduling_agent.core.llm_provider import LLMProvider
-
+from sa.nlp.llm_provider import LLMProvider
+from sa.core.settings import Settings
 # --- Fixture for LLM Provider ---
 
 
@@ -17,7 +13,8 @@ from scheduling_agent.core.llm_provider import LLMProvider
 def llm_provider() -> LLMProvider:
     """Provides an LLMProvider instance configured from environment variables."""
     # Assumes LLM_BASE_URL, LLM_MODEL, LLM_API_KEY might be set in the env
-    return LLMProvider()
+    settings = Settings()
+    return LLMProvider.from_settings(settings=settings)
 
 
 # --- Conditional Skip ---
@@ -27,10 +24,9 @@ def llm_provider() -> LLMProvider:
 # Also requires `openai` package installed.
 RUN_TESTS = os.environ.get("RUN_LLM_INTEGRATION_TESTS", "false").lower() == "true"
 # Check if the client was actually initialized successfully
-PROVIDER_CLIENT_AVAILABLE = LLMProvider().client is not None
 
 skip_llm_tests = pytest.mark.skipif(
-    not RUN_TESTS or not PROVIDER_CLIENT_AVAILABLE,
+    not RUN_TESTS,
     reason="LLM integration tests require RUN_LLM_INTEGRATION_TESTS=true, env vars set, and openai client initialized.",
 )
 

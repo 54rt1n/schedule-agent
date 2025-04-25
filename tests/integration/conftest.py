@@ -1,0 +1,59 @@
+from datetime import datetime
+import uuid
+
+import pytest
+
+from sa.db.dao import EventCreate
+from sa.db.service import DatabaseService
+from sa.event.date_utils import DateUtils
+from sa.event.conflict_resolver import ConflictResolver
+from sa.db.strategies.get_events_in_range import GetEventsInRangeStrategy
+from sa.db.strategies.create_event import CreateEventStrategy
+from sa.db.strategies.get_event_by_id import GetEventByIdStrategy
+from sa.db.strategies.save_a2a_task import SaveA2ATaskStrategy
+from sa.db.strategies.get_a2a_task_by_id import GetA2ATaskByIdStrategy
+from sa.db.strategies.update_a2a_task_status import UpdateA2ATaskStatusStrategy
+
+# Generic Sample Event Data (adjust if tests need more specific versions)
+@pytest.fixture
+def sample_event_data() -> dict:
+    """Provides generic sample data for creating an Event model."""
+    return {
+        "id": uuid.uuid4(),
+        "title": "Sample Test Event",
+        "start_time": datetime(2024, 8, 1, 10, 0, 0), # Use naive UTC for direct model creation
+        "end_time": datetime(2024, 8, 1, 11, 0, 0),
+        "time_zone": "UTC",
+    } 
+
+@pytest.fixture
+def create_event_strategy(db_service: DatabaseService, date_utils: DateUtils, conflict_resolver: ConflictResolver) -> CreateEventStrategy:
+    """Provides data for creating an Event model."""
+    get_events_in_range_strategy = GetEventsInRangeStrategy(db_service=db_service, date_utils=date_utils)
+    create_event_strategy = CreateEventStrategy(
+        db_service=db_service,
+        date_utils=date_utils,
+        conflict_resolver=conflict_resolver,
+        get_events_in_range_strategy=get_events_in_range_strategy,
+    )
+    return create_event_strategy
+
+@pytest.fixture
+def get_event_by_id_strategy(db_service: DatabaseService) -> GetEventByIdStrategy:
+    """Provides a strategy for getting an event by ID."""
+    return GetEventByIdStrategy(db_service=db_service)
+
+@pytest.fixture
+def save_a2a_task_strategy(db_service: DatabaseService) -> SaveA2ATaskStrategy:
+    """Provides a strategy for saving an A2A task."""
+    return SaveA2ATaskStrategy(db_service=db_service)
+
+@pytest.fixture
+def get_a2a_task_by_id_strategy(db_service: DatabaseService) -> GetA2ATaskByIdStrategy:
+    """Provides a strategy for getting an A2A task by ID."""
+    return GetA2ATaskByIdStrategy(db_service=db_service)
+
+@pytest.fixture
+def update_a2a_task_status_strategy(db_service: DatabaseService) -> UpdateA2ATaskStatusStrategy:
+    """Provides a strategy for updating an A2A task status."""
+    return UpdateA2ATaskStatusStrategy(db_service=db_service)

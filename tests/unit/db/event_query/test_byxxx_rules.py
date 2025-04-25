@@ -1,14 +1,24 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
+# from sqlalchemy.ext.asyncio import AsyncSession # No longer needed directly
 
-from scheduling_agent.db.schemas import EventCreate
-from scheduling_agent.db.service import DatabaseService
+from sa.core.logging_config import get_logger
+from sa.db.dao import EventCreate, TimeRange # Added TimeRange
+from sa.db.service import DatabaseService
+from sa.db.strategies.create_event import CreateEventStrategy
+from sa.db.strategies.get_events_in_range import GetEventsInRangeStrategy
+from sa.event.date_utils import DateUtils
+# Need ConflictResolver for CreateEventStrategy
+from sa.event.conflict_resolver import ConflictResolver
+
+logger = get_logger(__name__)
 
 # Helper function to create events and assert results
 async def _run_by_rule_test(
     db_service: DatabaseService,
+    date_utils: DateUtils,
+    conflict_resolver: ConflictResolver, # Added dependency
     event_title: str,
     base_start_utc: datetime,
     rrule: str,
@@ -18,16 +28,30 @@ async def _run_by_rule_test(
 ):
     # Arrange
     base_end_utc = base_start_utc + timedelta(hours=1)
-    await db_service.create_event(EventCreate(
+    event_create = EventCreate(
         title=event_title,
         start_time=base_start_utc.replace(tzinfo=None),
         end_time=base_end_utc.replace(tzinfo=None),
         time_zone="UTC",
         rrule=rrule,
-    ))
+    )
+
+    # Need the GetEventsInRangeStrategy instance for CreateEventStrategy
+    get_events_strategy = GetEventsInRangeStrategy(db_service=db_service, date_utils=date_utils)
+
+    create_strategy = CreateEventStrategy(
+        db_service=db_service,
+        date_utils=date_utils,
+        conflict_resolver=conflict_resolver,
+        get_events_in_range_strategy=get_events_strategy # Pass the instance
+    )
+    await create_strategy.execute(data=event_create)
 
     # Act
-    retrieved_events = await db_service.get_events_in_range(query_start_utc, query_end_utc)
+    # Use the same instance for getting events
+    strategy = get_events_strategy
+    strategy_input = (query_start_utc, query_end_utc)
+    retrieved_events = await strategy.execute(data=strategy_input)
 
     # Assert
     assert len(retrieved_events) == len(expected_start_times_utc)
@@ -194,7 +218,10 @@ async def _run_by_rule_test(
 )
 async def test_get_events_in_range_simple_byxxx_rules(
     db_service: DatabaseService,
-    test_id: str, # Keep test_id for potential debugging
+    date_utils: DateUtils,
+    conflict_resolver: ConflictResolver,
+    initialize_db: None, # Add DB initialization
+    test_id: str,
     event_title: str,
     base_start_utc: datetime,
     rrule: str,
@@ -205,6 +232,8 @@ async def test_get_events_in_range_simple_byxxx_rules(
     """Test simple BYxxx recurrence rules using the helper."""
     await _run_by_rule_test(
         db_service=db_service,
+        date_utils=date_utils,
+        conflict_resolver=conflict_resolver,
         event_title=event_title,
         base_start_utc=base_start_utc,
         rrule=rrule,

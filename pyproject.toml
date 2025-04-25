@@ -5,21 +5,21 @@ build-backend = "hatchling.build"
 [project]
 name = "scheduling_agent"
 version = "0.1.0"
-description = "A2A Scheduling Agent for calendar management"
+description = "Scheduling Agent for calendar management"
 readme = "README.md"
-requires-python = ">=3.10" # Changed from >=3.10 to >=3.12 as per section 1, but kept 3.10 from section 2 for now. Will adjust if needed.
+requires-python = ">=3.10"
 license = { file = "LICENSE" } # Will need to create LICENSE later
 authors = [
-  { name = "Your Name", email = "your.email@example.com" } # Placeholder - User should update
+  { name = "Martin Bukowski", email = "mbukowski@bmds.us" }
 ]
 dependencies = [
   "mcp[cli]>=1.6.0",
   "fastapi>=0.104.0",
   "uvicorn>=0.23.2",
-  "sqlalchemy[asyncio]>=2.0.22", # Added [asyncio] extra for SQLAlchemy
-  "sqlmodel>=0.0.14", # Added SQLModel as per section 3
+  "sqlalchemy[asyncio]>=2.0.22",
+  "sqlmodel>=0.0.14",
   "pydantic>=2.4.2",
-  "pydantic-settings", # Added pydantic-settings
+  "pydantic-settings",
   "python-dateutil>=2.8.2",
   "icalendar>=5.0.7",
   "python-dotenv>=1.0.0",
@@ -30,10 +30,11 @@ dependencies = [
   "structlog>=23.2.0",
   "alembic>=1.12.0",
   "sqlite-utils>=3.35.0",
-  "asyncpg", # Added driver for PostgreSQL, can be changed to psycopg if preferred
-  "greenlet", # Required by SQLAlchemy async
-  "aiosqlite", # Added driver for async SQLite
-  "zoneinfo; python_version < '3.9'", # For zoneinfo backport if needed, though requires-python >= 3.10
+  "asyncpg",
+  "greenlet",
+  "aiosqlite",
+  "asyncstdlib",
+  "zoneinfo; python_version < '3.9'",
 ]
 
 [project.optional-dependencies]
@@ -45,10 +46,10 @@ dev = [
   "httpx>=0.25.0",
   "types-python-dateutil>=2.8.19.14",
   "types-PyJWT>=1.7.1",
-  "types-sqlalchemy", # Added types for SQLAlchemy
-  "types-pytz", # Although using zoneinfo, some libs might still need this
-  "uv", # Add uv itself as a dev dependency
-  "pre-commit", # Useful for hooks
+  "types-sqlalchemy",
+  "types-pytz",
+  "uv",
+  "pre-commit",
 ]
 
 [project.scripts]
@@ -132,9 +133,7 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
-ignore_missing_imports = true # Start with true, gradually reduce
-# Add plugins if needed, e.g., for Pydantic, SQLAlchemy
-# plugins = ["pydantic.mypy", "sqlalchemy.ext.mypy.plugin"]
+ignore_missing_imports = true
 check_untyped_defs = true
 show_error_codes = true
 pretty = true
@@ -142,7 +141,3 @@ pretty = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 pythonpath = ["."]
-
-[tool.uv.sources]
-# Example of adding a private index if needed
-# my-index = { url = "https://my-private-index.com/simple" } 

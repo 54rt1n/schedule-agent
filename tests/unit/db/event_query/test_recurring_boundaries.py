@@ -1,16 +1,22 @@
-from datetime import UTC, datetime, timedelta
-
+from datetime import UTC, datetime
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from scheduling_agent.db.schemas import EventCreate
-from scheduling_agent.db.service import DatabaseService
+from sa.core.logging_config import get_logger
+from sa.db.dao import EventCreate
+from sa.db.service import DatabaseService
+from sa.db.strategies.create_event import CreateEventStrategy
+from sa.db.strategies.get_events_in_range import GetEventsInRangeStrategy
+from sa.event.date_utils import DateUtils
+from sa.event.conflict_resolver import ConflictResolver
+
+logger = get_logger(__name__)
 
 # Tests for recurring event queries (get_events_in_range)
 
 @pytest.mark.asyncio
 async def test_get_events_in_range_recurring(
-    db_service: DatabaseService, test_session: AsyncSession
+    db_service: DatabaseService, date_utils: DateUtils, test_session: AsyncSession, conflict_resolver: ConflictResolver
 ):
     """Test retrieving recurring event instances within a date range."""
     # --- Arrange ---
@@ -24,7 +30,14 @@ async def test_get_events_in_range_recurring(
         time_zone="UTC",
         rrule=rrule_str,
     )
-    base_event = await db_service.create_event(event_data=base_event_data)
+    get_events_strategy = GetEventsInRangeStrategy(db_service=db_service, date_utils=date_utils)
+    create_event_strategy = CreateEventStrategy(
+        db_service=db_service,
+        date_utils=date_utils,
+        conflict_resolver=conflict_resolver,
+        get_events_in_range_strategy=get_events_strategy
+    )
+    base_event = await create_event_strategy.execute(data=base_event_data)
     assert base_event.id is not None
 
     range_start = datetime(2024, 9, 10, 0, 0, 0)
@@ -33,9 +46,12 @@ async def test_get_events_in_range_recurring(
     # --- Act ---
     range_start_aware = range_start.replace(tzinfo=UTC)
     range_end_aware = range_end.replace(tzinfo=UTC)
-    retrieved_events = await db_service.get_events_in_range(
-        start=range_start_aware, end=range_end_aware
+    strategy = GetEventsInRangeStrategy(
+        db_service=db_service,
+        date_utils=date_utils
     )
+    strategy_input = (range_start_aware, range_end_aware)
+    retrieved_events = await strategy.execute(data=strategy_input)
 
     # --- Assert ---
     assert len(retrieved_events) == 2
@@ -52,7 +68,7 @@ async def test_get_events_in_range_recurring(
 
 
 @pytest.mark.asyncio
-async def test_get_events_in_range_recurring_outside_range(db_service: DatabaseService):
+async def test_get_events_in_range_recurring_outside_range(db_service: DatabaseService, date_utils: DateUtils, conflict_resolver: ConflictResolver):
     """Test that a recurring event entirely outside the range is not returned."""
     # --- Arrange ---
     event_create_data = EventCreate(
@@ -62,13 +78,25 @@ async def test_get_events_in_range_recurring_outside_range(db_service: DatabaseS
         time_zone="UTC",
         rrule="FREQ=DAILY;COUNT=5",
     )
-    await db_service.create_event(event_data=event_create_data)
+    get_events_strategy = GetEventsInRangeStrategy(db_service=db_service, date_utils=date_utils)
+    create_event_strategy = CreateEventStrategy(
+        db_service=db_service,
+        date_utils=date_utils,
+        conflict_resolver=conflict_resolver,
+        get_events_in_range_strategy=get_events_strategy
+    )
+    await create_event_strategy.execute(data=event_create_data)
 
     query_start = datetime(2024, 12, 1, 0, 0, 0, tzinfo=UTC)
     query_end = datetime(2024, 12, 31, 0, 0, 0, tzinfo=UTC)
 
     # --- Act ---
-    events = await db_service.get_events_in_range(query_start, query_end)
+    strategy = GetEventsInRangeStrategy(
+        db_service=db_service,
+        date_utils=date_utils
+    )
+    strategy_input = (query_start, query_end)
+    events = await strategy.execute(data=strategy_input)
 
     # --- Assert ---
     assert not events
@@ -167,6 +195,8 @@ RECUR_QUERY_END = datetime(2024, 11, 17, 0, 0, 0, tzinfo=UTC) # 1 week range
 )
 async def test_get_events_in_range_recurring_boundaries(
     db_service: DatabaseService,
+    date_utils: DateUtils,
+    conflict_resolver: ConflictResolver,
     test_id: str,
     event_start_utc: datetime,
     event_end_utc: datetime,
@@ -188,15 +218,21 @@ async def test_get_events_in_range_recurring_boundaries(
         time_zone="UTC", # Using UTC for simplicity
         rrule=rrule,
     )
-    created_event = await db_service.create_event(event_data=event_data)
+    get_events_in_range_strategy = GetEventsInRangeStrategy(db_service=db_service, date_utils=date_utils)
+    create_event_strategy = CreateEventStrategy(
+        db_service=db_service,
+        date_utils=date_utils,
+        conflict_resolver=conflict_resolver,
+        get_events_in_range_strategy=get_events_in_range_strategy
+    )
+    created_event = await create_event_strategy.execute(data=event_data)
     assert created_event is not None
     assert created_event.title == event_title
     assert created_event.rrule == rrule
 
     # --- Act ---
-    retrieved_events = await db_service.get_events_in_range(
-        start=RECUR_QUERY_START, end=RECUR_QUERY_END
-    )
+    strategy_input = (RECUR_QUERY_START, RECUR_QUERY_END)
+    retrieved_events = await get_events_in_range_strategy.execute(data=strategy_input)
 
     # --- Assert ---
     # These assertions are likely to fail due to the original bug

@@ -1,16 +1,19 @@
 from datetime import UTC, datetime, timedelta
-
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from scheduling_agent.db.schemas import EventCreate
-from scheduling_agent.db.service import DatabaseService
+from sa.core.logging_config import get_logger
+from sa.db.dao import EventCreate
+from sa.db.service import DatabaseService
+from sa.db.strategies.create_event import CreateEventStrategy
+from sa.db.strategies.get_events_in_range import GetEventsInRangeStrategy
+from sa.event.date_utils import DateUtils
+from sa.event.conflict_resolver import ConflictResolver
 
-# Tests for mixed/edge cases in event queries (get_events_in_range)
+logger = get_logger(__name__)
 
-# Test for Case 22: Mix of simple and recurring inside range
 @pytest.mark.asyncio
-async def test_get_events_in_range_mix_simple_recurring_inside(db_service: DatabaseService):
+async def test_get_events_in_range_mix_simple_recurring_inside(db_service: DatabaseService, date_utils: DateUtils, conflict_resolver: ConflictResolver):
     """Test retrieving a mix of simple and recurring instances within range."""
     # --- Arrange ---
     query_start = datetime(2025, 1, 15, 0, 0, 0, tzinfo=UTC)
@@ -20,7 +23,14 @@ async def test_get_events_in_range_mix_simple_recurring_inside(db_service: Datab
     simple_title = "Simple Event Inside"
     simple_start = datetime(2025, 1, 16, 10, 0, 0, tzinfo=UTC)
     simple_end = datetime(2025, 1, 16, 11, 0, 0, tzinfo=UTC)
-    await db_service.create_event(EventCreate(
+    get_events_strategy = GetEventsInRangeStrategy(db_service=db_service, date_utils=date_utils)
+    create_event_strategy = CreateEventStrategy(
+        db_service=db_service,
+        date_utils=date_utils,
+        conflict_resolver=conflict_resolver,
+        get_events_in_range_strategy=get_events_strategy
+    )
+    await create_event_strategy.execute(data=EventCreate(
         title=simple_title,
         start_time=simple_start.replace(tzinfo=None),
         end_time=simple_end.replace(tzinfo=None),
@@ -32,7 +42,7 @@ async def test_get_events_in_range_mix_simple_recurring_inside(db_service: Datab
     recur_base_start = datetime(2025, 1, 18, 14, 0, 0, tzinfo=UTC)
     recur_base_end = datetime(2025, 1, 18, 15, 0, 0, tzinfo=UTC)
     rrule = "FREQ=DAILY;COUNT=3" # Jan 18, 19, 20
-    await db_service.create_event(EventCreate(
+    await create_event_strategy.execute(data=EventCreate(
         title=recur_title,
         start_time=recur_base_start.replace(tzinfo=None),
         end_time=recur_base_end.replace(tzinfo=None),
@@ -41,7 +51,12 @@ async def test_get_events_in_range_mix_simple_recurring_inside(db_service: Datab
     ))
 
     # --- Act ---
-    retrieved_events = await db_service.get_events_in_range(query_start, query_end)
+    strategy = GetEventsInRangeStrategy(
+        db_service=db_service,
+        date_utils=date_utils
+    )
+    strategy_input = (query_start, query_end)
+    retrieved_events = await strategy.execute(data=strategy_input)
 
     # --- Assert ---
     # Expect 1 simple event + 3 recurring instances = 4 total
@@ -68,7 +83,7 @@ async def test_get_events_in_range_mix_simple_recurring_inside(db_service: Datab
 
 # Test for Case 23: Mix - Simple Outside, Recurring Inside
 @pytest.mark.asyncio
-async def test_get_events_in_range_mix_simple_outside_recurring_inside(db_service: DatabaseService):
+async def test_get_events_in_range_mix_simple_outside_recurring_inside(db_service: DatabaseService, date_utils: DateUtils, conflict_resolver: ConflictResolver):
     """Test retrieving only recurring instance when simple event is outside range."""
     # --- Arrange ---
     query_start = datetime(2025, 2, 10, 0, 0, 0, tzinfo=UTC)
@@ -78,7 +93,14 @@ async def test_get_events_in_range_mix_simple_outside_recurring_inside(db_servic
     simple_title = "Simple Event Outside"
     simple_start = datetime(2025, 2, 1, 10, 0, 0, tzinfo=UTC)
     simple_end = datetime(2025, 2, 1, 11, 0, 0, tzinfo=UTC)
-    await db_service.create_event(EventCreate(
+    get_events_strategy = GetEventsInRangeStrategy(db_service=db_service, date_utils=date_utils)
+    create_event_strategy = CreateEventStrategy(
+        db_service=db_service,
+        date_utils=date_utils,
+        conflict_resolver=conflict_resolver,
+        get_events_in_range_strategy=get_events_strategy
+    )
+    await create_event_strategy.execute(data=EventCreate(
         title=simple_title,
         start_time=simple_start.replace(tzinfo=None),
         end_time=simple_end.replace(tzinfo=None),
@@ -90,7 +112,7 @@ async def test_get_events_in_range_mix_simple_outside_recurring_inside(db_servic
     recur_base_start = datetime(2025, 2, 11, 14, 0, 0, tzinfo=UTC)
     recur_base_end = datetime(2025, 2, 11, 15, 0, 0, tzinfo=UTC)
     rrule = "FREQ=DAILY;COUNT=3" # Feb 11, 12, 13
-    await db_service.create_event(EventCreate(
+    await create_event_strategy.execute(data=EventCreate(
         title=recur_title,
         start_time=recur_base_start.replace(tzinfo=None),
         end_time=recur_base_end.replace(tzinfo=None),
@@ -99,7 +121,12 @@ async def test_get_events_in_range_mix_simple_outside_recurring_inside(db_servic
     ))
 
     # --- Act ---
-    retrieved_events = await db_service.get_events_in_range(query_start, query_end)
+    strategy = GetEventsInRangeStrategy(
+        db_service=db_service,
+        date_utils=date_utils
+    )
+    strategy_input = (query_start, query_end)
+    retrieved_events = await strategy.execute(data=strategy_input)
 
     # --- Assert ---
     # Expect only the 3 recurring instances
@@ -119,7 +146,7 @@ async def test_get_events_in_range_mix_simple_outside_recurring_inside(db_servic
 
 # Test for Case 24: Timezone - Event created in non-UTC TZ
 @pytest.mark.asyncio
-async def test_get_events_in_range_timezone_non_utc(db_service: DatabaseService):
+async def test_get_events_in_range_timezone_non_utc(db_service: DatabaseService, date_utils: DateUtils, conflict_resolver: ConflictResolver):
     """Test retrieving an event created in a non-UTC timezone using a UTC query range."""
     # --- Arrange ---
     event_title = "New York Event"
@@ -128,7 +155,14 @@ async def test_get_events_in_range_timezone_non_utc(db_service: DatabaseService)
     event_local_start = datetime(2025, 2, 5, 10, 0, 0) # Naive local time
     event_local_end = datetime(2025, 2, 5, 11, 0, 0)   # Naive local time
 
-    await db_service.create_event(EventCreate(
+    get_events_strategy = GetEventsInRangeStrategy(db_service=db_service, date_utils=date_utils)
+    create_event_strategy = CreateEventStrategy(
+        db_service=db_service,
+        date_utils=date_utils,
+        conflict_resolver=conflict_resolver,
+        get_events_in_range_strategy=get_events_strategy
+    )
+    await create_event_strategy.execute(data=EventCreate(
         title=event_title,
         start_time=event_local_start, # Pass naive local time
         end_time=event_local_end,
@@ -140,7 +174,12 @@ async def test_get_events_in_range_timezone_non_utc(db_service: DatabaseService)
     query_end_utc = datetime(2025, 2, 5, 15, 30, 0, tzinfo=UTC)
 
     # --- Act ---
-    retrieved_events = await db_service.get_events_in_range(query_start_utc, query_end_utc)
+    strategy = GetEventsInRangeStrategy(
+        db_service=db_service,
+        date_utils=date_utils
+    )
+    strategy_input = (query_start_utc, query_end_utc)
+    retrieved_events = await strategy.execute(data=strategy_input)
 
     # --- Assert ---
     # Expect 1 event
@@ -196,7 +235,9 @@ async def test_get_events_in_range_timezone_non_utc(db_service: DatabaseService)
 )
 async def test_get_events_in_range_dst_transitions(
     db_service: DatabaseService,
+    date_utils: DateUtils,
     test_session: AsyncSession, # Keep test_session if used for verification inside test
+    conflict_resolver: ConflictResolver,
     tz_name: str,
     event_local_start: datetime,
     rrule_str: str,
@@ -215,13 +256,23 @@ async def test_get_events_in_range_dst_transitions(
         time_zone=tz_name,
         rrule=rrule_str,
     )
-    created_base_event = await db_service.create_event(event_data=base_event_data)
+    get_events_strategy = GetEventsInRangeStrategy(db_service=db_service, date_utils=date_utils)
+    create_event_strategy = CreateEventStrategy(
+        db_service=db_service,
+        date_utils=date_utils,
+        conflict_resolver=conflict_resolver,
+        get_events_in_range_strategy=get_events_strategy
+    )
+    created_base_event = await create_event_strategy.execute(data=base_event_data)
     assert created_base_event is not None
 
     # Act
-    retrieved_event_instances = await db_service.get_events_in_range(
-        start=query_range_start_utc, end=query_range_end_utc
+    strategy = GetEventsInRangeStrategy(
+        db_service=db_service,
+        date_utils=date_utils
     )
+    strategy_input = (query_range_start_utc, query_range_end_utc)
+    retrieved_event_instances = await strategy.execute(data=strategy_input)
 
     # Assert
     assert len(retrieved_event_instances) == len(expected_naive_utc_starts)

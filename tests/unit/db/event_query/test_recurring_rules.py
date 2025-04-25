@@ -3,10 +3,17 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-# Need models for creating exclusions/modifications
-from scheduling_agent.db.models import ExcludedDate, ModifiedInstance
-from scheduling_agent.db.schemas import EventCreate
-from scheduling_agent.db.service import DatabaseService
+from sa.core.logging_config import get_logger
+from sa.db.models import ExcludedDate, ModifiedInstance
+from sa.db.dao import EventCreate
+from sa.db.service import DatabaseService
+from sa.event.date_utils import DateUtils
+from sa.db.strategies.create_event import CreateEventStrategy
+from sa.db.strategies.get_events_in_range import GetEventsInRangeStrategy
+from sa.event.conflict_resolver import ConflictResolver
+
+
+logger = get_logger(__name__)
 
 # Tests for recurring event rules (COUNT, UNTIL, EXDATE, ModifiedInstance, etc.)
 
@@ -52,6 +59,8 @@ from scheduling_agent.db.service import DatabaseService
 )
 async def test_get_events_in_range_recurring_count(
     db_service: DatabaseService,
+    date_utils: DateUtils,
+    conflict_resolver: ConflictResolver,
     test_id: str,
     event_title: str,
     base_start_utc: datetime,
@@ -70,11 +79,16 @@ async def test_get_events_in_range_recurring_count(
         time_zone="UTC",
         rrule=rrule,
     )
-    created_event = await db_service.create_event(event_data=event_data)
+    get_events_in_range_strategy = GetEventsInRangeStrategy(db_service=db_service, date_utils=date_utils)
+    create_event_strategy = CreateEventStrategy(db_service=db_service, date_utils=date_utils,
+                                                get_events_in_range_strategy=get_events_in_range_strategy,
+                                                conflict_resolver=conflict_resolver)
+    created_event = await create_event_strategy.execute(data=event_data)
     assert created_event is not None
 
     # --- Act ---
-    retrieved_events = await db_service.get_events_in_range(query_start_utc, query_end_utc)
+    strategy_input = (query_start_utc, query_end_utc)
+    retrieved_events = await get_events_in_range_strategy.execute(data=strategy_input)
 
     # --- Assert ---
     expected_starts_naive = sorted([dt.replace(tzinfo=None) for dt in expected_starts_utc])
@@ -135,6 +149,8 @@ async def test_get_events_in_range_recurring_count(
 )
 async def test_get_events_in_range_recurring_until(
     db_service: DatabaseService,
+    date_utils: DateUtils,
+    conflict_resolver: ConflictResolver,
     test_id: str,
     event_title: str,
     base_start_utc: datetime,
@@ -153,11 +169,16 @@ async def test_get_events_in_range_recurring_until(
         time_zone="UTC",
         rrule=rrule,
     )
-    created_event = await db_service.create_event(event_data=event_data)
+    get_events_in_range_strategy = GetEventsInRangeStrategy(db_service=db_service, date_utils=date_utils)
+    create_event_strategy = CreateEventStrategy(db_service=db_service, date_utils=date_utils,
+                                                get_events_in_range_strategy=get_events_in_range_strategy,
+                                                conflict_resolver=conflict_resolver)
+    created_event = await create_event_strategy.execute(data=event_data)
     assert created_event is not None
 
     # --- Act ---
-    retrieved_events = await db_service.get_events_in_range(query_start_utc, query_end_utc)
+    strategy_input = (query_start_utc, query_end_utc)
+    retrieved_events = await get_events_in_range_strategy.execute(data=strategy_input)
 
     # --- Assert ---
     expected_starts_naive = sorted([dt.replace(tzinfo=None) for dt in expected_starts_utc])
@@ -168,7 +189,12 @@ async def test_get_events_in_range_recurring_until(
 
 # Test for Case 46: EXDATE - Exclude instance within range
 @pytest.mark.asyncio
-async def test_get_events_in_range_recurring_exdate_inside(db_service: DatabaseService, test_session: AsyncSession):
+async def test_get_events_in_range_recurring_exdate_inside(
+    db_service: DatabaseService,
+    date_utils: DateUtils,
+    conflict_resolver: ConflictResolver,
+    initialize_db
+):
     """Test that EXDATE correctly excludes an instance within the query range."""
     # --- Arrange ---
     event_title = "Event With Excluded Date Inside"
@@ -183,23 +209,29 @@ async def test_get_events_in_range_recurring_exdate_inside(db_service: DatabaseS
         time_zone="UTC",
         rrule=rrule,
     )
-    created_event = await db_service.create_event(event_data=event_data)
+    get_events_in_range_strategy = GetEventsInRangeStrategy(db_service=db_service, date_utils=date_utils)
+    create_event_strategy = CreateEventStrategy(db_service=db_service, date_utils=date_utils,
+                                                get_events_in_range_strategy=get_events_in_range_strategy,
+                                                conflict_resolver=conflict_resolver)
+    created_event = await create_event_strategy.execute(data=event_data)
     assert created_event is not None
     assert created_event.id is not None
 
     # Exclude Dec 12 (which is inside the query range)
     excluded_dt_naive = datetime(2024, 12, 12, 10, 0, 0)
-    async with test_session.begin():
-        exdate = ExcludedDate(event_id=created_event.id, excluded_date=excluded_dt_naive)
-        test_session.add(exdate)
-        await test_session.commit()
+    async with db_service.get_session() as session:
+        async with session.begin():
+            exdate = ExcludedDate(event_id=created_event.id, excluded_date=excluded_dt_naive)
+            session.add(exdate)
+            await session.flush()
 
     # Query range covering all potential original instances
     query_start = datetime(2024, 12, 10, 0, 0, 0, tzinfo=UTC)
     query_end = datetime(2024, 12, 15, 0, 0, 0, tzinfo=UTC)
 
     # --- Act ---
-    retrieved_events = await db_service.get_events_in_range(query_start, query_end)
+    strategy_input = (query_start, query_end)
+    retrieved_events = await get_events_in_range_strategy.execute(data=strategy_input)
 
     # --- Assert ---
     # Expecting 4 events (Dec 10, 11, 13, 14), excluding Dec 12
@@ -215,7 +247,7 @@ async def test_get_events_in_range_recurring_exdate_inside(db_service: DatabaseS
 
 # Test for Case 47: EXDATE - Exclude instance at range start
 @pytest.mark.asyncio
-async def test_get_events_in_range_recurring_exdate_at_start(db_service: DatabaseService, test_session: AsyncSession):
+async def test_get_events_in_range_recurring_exdate_at_start(db_service: DatabaseService, date_utils: DateUtils, conflict_resolver: ConflictResolver):
     """Test that EXDATE correctly excludes an instance starting exactly at query start."""
     # --- Arrange ---
     event_title = "Event With Excluded Date At Start"
@@ -230,23 +262,29 @@ async def test_get_events_in_range_recurring_exdate_at_start(db_service: Databas
         time_zone="UTC",
         rrule=rrule,
     )
-    created_event = await db_service.create_event(event_data=event_data)
+    get_events_in_range_strategy = GetEventsInRangeStrategy(db_service=db_service, date_utils=date_utils)
+    create_event_strategy = CreateEventStrategy(db_service=db_service, date_utils=date_utils,
+                                                get_events_in_range_strategy=get_events_in_range_strategy,
+                                                conflict_resolver=conflict_resolver)
+    created_event = await create_event_strategy.execute(data=event_data)
     assert created_event is not None
     assert created_event.id is not None
 
     # Exclude Dec 11
     excluded_dt_naive = datetime(2024, 12, 11, 10, 0, 0)
-    async with test_session.begin():
-        exdate = ExcludedDate(event_id=created_event.id, excluded_date=excluded_dt_naive)
-        test_session.add(exdate)
-        await test_session.commit()
+    async with db_service.get_session() as session:
+        async with session.begin():
+            exdate = ExcludedDate(event_id=created_event.id, excluded_date=excluded_dt_naive)
+            session.add(exdate)
+            await session.flush()
 
     # Query range starting exactly at the excluded instance time
     query_start = datetime(2024, 12, 11, 10, 0, 0, tzinfo=UTC)
     query_end = datetime(2024, 12, 13, 0, 0, 0, tzinfo=UTC)
 
     # --- Act ---
-    retrieved_events = await db_service.get_events_in_range(query_start, query_end)
+    strategy_input = (query_start, query_end)
+    retrieved_events = await get_events_in_range_strategy.execute(data=strategy_input)
 
     # --- Assert ---
     # Expecting only Dec 12 instance (Dec 11 is excluded)
@@ -255,7 +293,12 @@ async def test_get_events_in_range_recurring_exdate_at_start(db_service: Databas
 
 # Test for Case 52: Modified: Instance moved *into* range
 @pytest.mark.asyncio
-async def test_get_events_in_range_recurring_mod_into_range(db_service: DatabaseService, test_session: AsyncSession):
+async def test_get_events_in_range_recurring_mod_into_range(
+    db_service: DatabaseService,
+    date_utils: DateUtils,
+    conflict_resolver: ConflictResolver,
+    initialize_db
+):
     """Test modification moving an instance into the query range."""
     # --- Arrange ---
     event_title = "Event Instance Moved Into Range"
@@ -270,7 +313,11 @@ async def test_get_events_in_range_recurring_mod_into_range(db_service: Database
         time_zone="UTC",
         rrule=rrule,
     )
-    created_event = await db_service.create_event(event_data=event_data)
+    get_events_in_range_strategy = GetEventsInRangeStrategy(db_service=db_service, date_utils=date_utils)
+    create_event_strategy = CreateEventStrategy(db_service=db_service, date_utils=date_utils,
+                                                get_events_in_range_strategy=get_events_in_range_strategy,
+                                                conflict_resolver=conflict_resolver)
+    created_event = await create_event_strategy.execute(data=event_data)
     assert created_event is not None
     assert created_event.id is not None
 
@@ -279,24 +326,26 @@ async def test_get_events_in_range_recurring_mod_into_range(db_service: Database
     modified_start_naive = datetime(2025, 3, 11, 14, 0, 0)
     modified_end_naive = datetime(2025, 3, 11, 15, 0, 0)
 
-    async with test_session.begin():
-        mod_instance = ModifiedInstance(
-            event_id=created_event.id,
-            original_date=original_date_naive,
-            start_time=modified_start_naive,
-            end_time=modified_end_naive,
-            time_zone="UTC",
-            title="Modified Into Range Title",
-        )
-        test_session.add(mod_instance)
-        await test_session.commit()
+    async with db_service.get_session() as session:
+        async with session.begin():
+            mod_instance = ModifiedInstance(
+                event_id=created_event.id,
+                original_date=original_date_naive,
+                start_time=modified_start_naive,
+                end_time=modified_end_naive,
+                time_zone="UTC",
+                title="Modified Into Range Title",
+            )
+            session.add(mod_instance)
+            await session.flush()
 
     # Query range [Mar 11, Mar 16) - only covers the modified instance
     query_start = datetime(2025, 3, 11, 0, 0, 0, tzinfo=UTC)
     query_end = datetime(2025, 3, 16, 0, 0, 0, tzinfo=UTC)
 
     # --- Act ---
-    retrieved_events = await db_service.get_events_in_range(query_start, query_end)
+    strategy_input = (query_start, query_end)
+    retrieved_events = await get_events_in_range_strategy.execute(data=strategy_input)
 
     # --- Assert ---
     assert len(retrieved_events) == 1
@@ -305,7 +354,7 @@ async def test_get_events_in_range_recurring_mod_into_range(db_service: Database
 
 # Test for Case 53: Modified: Instance moved *out of* range
 @pytest.mark.asyncio
-async def test_get_events_in_range_recurring_mod_out_of_range(db_service: DatabaseService, test_session: AsyncSession):
+async def test_get_events_in_range_recurring_mod_out_of_range(db_service: DatabaseService, date_utils: DateUtils, conflict_resolver: ConflictResolver):
     """Test modification moving an instance out of the query range."""
     # --- Arrange ---
     event_title = "Event Instance Moved Out Of Range"
@@ -320,7 +369,12 @@ async def test_get_events_in_range_recurring_mod_out_of_range(db_service: Databa
         time_zone="UTC",
         rrule=rrule,
     )
-    created_event = await db_service.create_event(event_data=event_data)
+    get_events_in_range_strategy = GetEventsInRangeStrategy(db_service=db_service, date_utils=date_utils)
+    create_event_strategy = CreateEventStrategy(
+        db_service=db_service, date_utils=date_utils,
+        conflict_resolver=conflict_resolver,
+        get_events_in_range_strategy=get_events_in_range_strategy)
+    created_event = await create_event_strategy.execute(data=event_data)
     assert created_event is not None
     assert created_event.id is not None
 
@@ -329,23 +383,25 @@ async def test_get_events_in_range_recurring_mod_out_of_range(db_service: Databa
     modified_start_naive = datetime(2025, 3, 18, 14, 0, 0)
     modified_end_naive = datetime(2025, 3, 18, 15, 0, 0)
 
-    async with test_session.begin():
-        mod_instance = ModifiedInstance(
-            event_id=created_event.id,
-            original_date=original_date_naive,
-            start_time=modified_start_naive,
-            end_time=modified_end_naive,
-            time_zone="UTC",
-        )
-        test_session.add(mod_instance)
-        await test_session.commit()
+    async with db_service.get_session() as session:
+        async with session.begin():
+            mod_instance = ModifiedInstance(
+                event_id=created_event.id,
+                original_date=original_date_naive,
+                start_time=modified_start_naive,
+                end_time=modified_end_naive,
+                time_zone="UTC",
+            )
+            session.add(mod_instance)
+            await session.flush()
 
     # Query range [Mar 5, Mar 15) - covers original Mar 10, but not modified Mar 18
     query_start = datetime(2025, 3, 5, 0, 0, 0, tzinfo=UTC)
     query_end = datetime(2025, 3, 15, 0, 0, 0, tzinfo=UTC)
 
     # --- Act ---
-    retrieved_events = await db_service.get_events_in_range(query_start, query_end)
+    strategy_input = (query_start, query_end)
+    retrieved_events = await get_events_in_range_strategy.execute(data=strategy_input)
 
     # --- Assert ---
     # Expect 0 events, as Mar 10 was replaced and moved outside
@@ -353,7 +409,7 @@ async def test_get_events_in_range_recurring_mod_out_of_range(db_service: Databa
 
 # Test for Case 54: Modified: Instance time changed within range
 @pytest.mark.asyncio
-async def test_get_events_in_range_recurring_mod_time_inside(db_service: DatabaseService, test_session: AsyncSession):
+async def test_get_events_in_range_recurring_mod_time_inside(db_service: DatabaseService, date_utils: DateUtils, conflict_resolver: ConflictResolver):
     """Test modification changing time of an instance still within the query range."""
     # --- Arrange ---
     event_title = "Event Instance Time Modified Inside"
@@ -368,7 +424,13 @@ async def test_get_events_in_range_recurring_mod_time_inside(db_service: Databas
         time_zone="UTC",
         rrule=rrule,
     )
-    created_event = await db_service.create_event(event_data=event_data)
+    get_events_in_range_strategy = GetEventsInRangeStrategy(db_service=db_service, date_utils=date_utils)
+
+    create_event_strategy = CreateEventStrategy(
+        db_service=db_service, date_utils=date_utils,
+        conflict_resolver=conflict_resolver,
+        get_events_in_range_strategy=get_events_in_range_strategy)
+    created_event = await create_event_strategy.execute(data=event_data)
     assert created_event is not None
     assert created_event.id is not None
 
@@ -377,24 +439,26 @@ async def test_get_events_in_range_recurring_mod_time_inside(db_service: Databas
     modified_start_naive = datetime(2025, 3, 11, 14, 0, 0)
     modified_end_naive = datetime(2025, 3, 11, 15, 0, 0)
 
-    async with test_session.begin():
-        mod_instance = ModifiedInstance(
-            event_id=created_event.id,
-            original_date=original_date_naive,
-            start_time=modified_start_naive,
-            end_time=modified_end_naive,
-            time_zone="UTC",
-            title="Modified Time Title",
-        )
-        test_session.add(mod_instance)
-        await test_session.commit()
+    async with db_service.get_session() as session:
+        async with session.begin():
+            mod_instance = ModifiedInstance(
+                event_id=created_event.id,
+                original_date=original_date_naive,
+                start_time=modified_start_naive,
+                end_time=modified_end_naive,
+                time_zone="UTC",
+                title="Modified Time Title",
+            )
+            session.add(mod_instance)
+            await session.flush()
 
     # Query range covering all original/modified instances
     query_start = datetime(2025, 3, 10, 0, 0, 0, tzinfo=UTC)
     query_end = datetime(2025, 3, 13, 0, 0, 0, tzinfo=UTC)
 
     # --- Act ---
-    retrieved_events = await db_service.get_events_in_range(query_start, query_end)
+    strategy_input = (query_start, query_end)
+    retrieved_events = await get_events_in_range_strategy.execute(data=strategy_input)
 
     # --- Assert ---
     # Expecting 3 events: Mar 10 (original), Mar 11 (modified), Mar 12 (original)

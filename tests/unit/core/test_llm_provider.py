@@ -1,455 +1,396 @@
-import json
-from datetime import UTC, datetime
-from unittest.mock import ANY, AsyncMock, MagicMock, patch
-
 import pytest
+from unittest.mock import patch, MagicMock, AsyncMock
+import openai  # For error types
+import json
 
-# Assuming openai might not be installed in all test environments
-try:
-    import openai
-except ImportError:
-    openai = None
+from sa.nlp.llm_provider import LLMProvider
+from sa.core.settings import Settings
 
-from scheduling_agent.core.llm_provider import LLMProvider
-
-# --- Fixtures ---
-
+# Test Factory Method (`from_settings`) and Initialization Logic via Factory
+# ==========================================================================
+# conftest.py sets default test values:
+# LLM_BASE_URL="http://local.test/v1", LLM_MODEL="test_model", LLM_API_KEY=None
 
 @pytest.fixture
-def llm_provider() -> LLMProvider:
-    """Provides an LLMProvider instance for unit tests."""
-    # Initialize with dummy key/URL for testing internal logic
-    # The actual client object will be mocked in tests
-    provider = LLMProvider(api_key="dummy_key", base_url="http://dummy.url", model="dummy-model")
-    # Ensure client attribute exists for mocking even if openai isn't installed
-    if not hasattr(provider, "client"):
-        provider.client = None
-    return provider
+def mock_settings_local() -> MagicMock:
+    """Provides mocked Settings with a local URL and no API key."""
+    settings = MagicMock(spec=Settings)
+    settings.llm_api_key = None
+    settings.llm_base_url = "http://mock-local-llm/v1"
+    settings.llm_model = "local-test-model"
+    return settings
 
+@pytest.fixture
+def mock_settings_openai_key() -> MagicMock:
+    """Provides mocked Settings for default OpenAI URL with an API key."""
+    settings = MagicMock(spec=Settings)
+    settings.llm_api_key = "test_openai_key_123"
+    settings.llm_base_url = None # Trigger default OpenAI URL
+    settings.llm_model = "gpt-4o-test"
+    return settings
 
-# --- Helper to Mock OpenAI Client Response ---
+@pytest.fixture
+def mock_settings_openai_no_key() -> MagicMock:
+    """Provides mocked Settings for default OpenAI URL with NO API key."""
+    settings = MagicMock(spec=Settings)
+    settings.llm_api_key = None
+    settings.llm_base_url = None # Trigger default OpenAI URL
+    settings.llm_model = "gpt-3.5-test"
+    return settings
 
+@pytest.fixture
+def mock_settings_override() -> MagicMock:
+    """Provides mocked Settings with all values explicitly set."""
+    settings = MagicMock(spec=Settings)
+    settings.llm_api_key = "override_api_key"
+    settings.llm_base_url = "http://custom-override.com/api"
+    settings.llm_model = "custom-model-override"
+    return settings
 
-def mock_openai_response(content: dict | None = None, status_code: int = 200, error: Exception | None = None):
-    """Creates a mock OpenAI API response object or simulates an error."""
-    if error:
-        mock_response = AsyncMock()
-        mock_response.side_effect = error
-        return mock_response
+@patch('openai.AsyncClient')
+@patch('sa.nlp.llm_provider.logger')
+def test_from_settings_local(mock_logger, mock_AsyncClient, mock_settings_local):
+    """Test factory uses local settings correctly."""
+    # Act
+    provider = LLMProvider.from_settings(mock_settings_local)
 
-    mock_choice = AsyncMock()
-    mock_choice.message = AsyncMock()
-    mock_choice.message.content = json.dumps(content) if content else None
-
-    mock_response = AsyncMock()
-    mock_response.choices = [mock_choice]
-    return mock_response
-
-
-# --- Unit Tests (Testing internal logic with mocks) ---
-
-
-@pytest.mark.asyncio
-@patch("openai.AsyncClient", new_callable=AsyncMock)  # Patch the client
-async def test_unit_parse_scheduling_query_success(
-    mock_async_client_class: AsyncMock, llm_provider: LLMProvider
-):
-    """Unit test successful parsing logic, mocking the client call."""
-    query = "Schedule Project Kickoff with alice@example.com next Friday at 10am EST"
-
-    # Expected JSON response from the LLM based on the prompt
-    expected_llm_json = {
-        "intent": "create_event",
-        "date_info": {
-            "start_date": "2024-01-05",
-            "end_date": "2024-01-05",
-            "specific_time": "10:00:00",
-            "time_description": "next Friday at 10am EST",
-            "timeZone": "America/New_York",
-        },
-        "filters": {"title": "Project Kickoff", "participants": ["alice@example.com"]},
-        "confidence": 0.9,
-    }
-
-    # Configure the mock client instance and its create method
-    mock_client_instance = AsyncMock()
-    mock_client_instance.chat.completions.create = AsyncMock(
-        return_value=mock_openai_response(expected_llm_json)
+    # Assert
+    assert provider.api_key is None
+    assert provider.base_url == "http://mock-local-llm/v1"
+    assert provider.model == "local-test-model"
+    mock_logger.warning.assert_not_called() # No warning for local URL without key
+    mock_logger.info.assert_any_call( # Check for creation log
+        "Creating LLMProvider from settings: model='local-test-model', base_url='http://mock-local-llm/v1'"
     )
-    # Assign the configured instance to the provider
-    llm_provider.client = mock_client_instance
-
-    # Call the method under test
-    result = await llm_provider.parse_scheduling_query(query)
-
-    # Assertions
-    assert result is not None
-    mock_client_instance.chat.completions.create.assert_awaited_once()
-    # Check prompt content (optional, can be brittle)
-    call_args, call_kwargs = mock_client_instance.chat.completions.create.call_args
-    assert call_kwargs["model"] == llm_provider.model
-    assert call_kwargs["messages"][1]["content"] == query
-    assert "Determine the user's primary **intent**" in call_kwargs["messages"][0]["content"]
-
-    # Check attributes directly on the Pydantic model
-    assert result.intent == "create_event"
-    assert result.method == "llm"  # Should be added by provider
-    assert result.date_info is not None
-    assert result.date_info.start_date == "2024-01-05"
-    assert result.filters is not None
-    assert result.filters.title == "Project Kickoff"
-    assert result.filters.participants == ["alice@example.com"]
-    assert result.confidence == 0.9
-
-
-@pytest.mark.asyncio
-@patch("openai.AsyncClient", new_callable=AsyncMock)
-async def test_unit_parse_scheduling_query_llm_fails_fallback_succeeds(
-    mock_async_client_class: AsyncMock, llm_provider: LLMProvider
-):
-    """Unit test fallback logic when LLM call returns None/empty content."""
-    query = "Meeting tomorrow morning"
-
-    # Simulate LLM failure by returning None content
-    mock_client_instance = AsyncMock()
-    mock_client_instance.chat.completions.create = AsyncMock(
-        return_value=mock_openai_response(content=None)
+    mock_AsyncClient.assert_called_once_with(
+        api_key=None,
+        base_url="http://mock-local-llm/v1"
     )
-    llm_provider.client = mock_client_instance
 
-    # Call the method under test
-    result = await llm_provider.parse_scheduling_query(query)
+@patch('openai.AsyncClient')
+@patch('sa.nlp.llm_provider.logger')
+def test_from_settings_openai_with_key(mock_logger, mock_AsyncClient, mock_settings_openai_key):
+    """Test factory defaults to OpenAI URL and uses provided key."""
+    # Act
+    provider = LLMProvider.from_settings(mock_settings_openai_key)
 
-    # Assertions
-    assert result is not None
-    mock_client_instance.chat.completions.create.assert_awaited_once()  # LLM call was attempted
-
-    # Check attributes directly on the Pydantic model
-    assert result.method == "fallback_default"
-    assert result.intent == "unknown"
-    assert result.date_info is not None
-    assert result.date_info.method == "fallback_default"
-    assert result.date_info.start_date is not None  # Check presence of date
-    assert result.filters is not None
-    assert result.filters.participants == []  # Check default value
-    assert result.confidence == 0.2
-
-
-@pytest.mark.asyncio
-@patch("openai.AsyncClient", new_callable=AsyncMock)
-@patch("dateparser.parse", return_value=None)  # Also mock dateparser to fail
-async def test_unit_parse_scheduling_query_total_failure(
-    mock_dateparser_parse: AsyncMock, mock_async_client_class: AsyncMock, llm_provider: LLMProvider
-):
-    """Unit test fallback logic when both LLM and dateparser fail."""
-    query = "some nonsense query"
-
-    # Simulate LLM failure
-    mock_client_instance = AsyncMock()
-    mock_client_instance.chat.completions.create = AsyncMock(
-        return_value=mock_openai_response(content=None)
+    # Assert
+    assert provider.api_key == "test_openai_key_123"
+    assert provider.base_url == "https://api.openai.com/v1" # Default applied
+    assert provider.model == "gpt-4o-test"
+    mock_logger.info.assert_any_call( # Check for default URL info log
+        "No LLM base URL found in settings, defaulting to OpenAI API.",
+        default_url="https://api.openai.com/v1"
     )
-    llm_provider.client = mock_client_instance
+    mock_logger.warning.assert_not_called() # Has key, so no warning
+    mock_logger.info.assert_any_call( # Check for creation log
+        "Creating LLMProvider from settings: model='gpt-4o-test', base_url='https://api.openai.com/v1'"
+    )
+    mock_AsyncClient.assert_called_once_with(
+        api_key="test_openai_key_123",
+        base_url="https://api.openai.com/v1"
+    )
 
-    # Call the method under test
-    result = await llm_provider.parse_scheduling_query(query)
+@patch('openai.AsyncClient')
+@patch('sa.nlp.llm_provider.logger')
+def test_from_settings_openai_without_key(mock_logger, mock_AsyncClient, mock_settings_openai_no_key):
+    """Test factory defaults to OpenAI URL and logs warning if key is missing."""
+    # Act
+    provider = LLMProvider.from_settings(mock_settings_openai_no_key)
 
-    # Assertions
-    assert result is not None
-    mock_client_instance.chat.completions.create.assert_awaited_once()  # LLM call was attempted
-    mock_dateparser_parse.assert_called_once()  # Dateparser was attempted
+    # Assert
+    assert provider.api_key is None
+    assert provider.base_url == "https://api.openai.com/v1" # Default applied
+    assert provider.model == "gpt-3.5-test"
+    mock_logger.info.assert_any_call( # Check for default URL info log
+        "No LLM base URL found in settings, defaulting to OpenAI API.",
+        default_url="https://api.openai.com/v1"
+    )
+    mock_logger.warning.assert_called_with( # Check for the specific warning
+        "OpenAI API key not found in settings (LLM_API_KEY)."
+    )
+    mock_logger.info.assert_any_call( # Check for creation log
+        "Creating LLMProvider from settings: model='gpt-3.5-test', base_url='https://api.openai.com/v1'"
+    )
+    mock_AsyncClient.assert_called_once_with(
+        api_key=None,
+        base_url="https://api.openai.com/v1"
+    )
 
-    # Check attributes directly on the Pydantic model
-    assert result.method == "fallback_default"
-    assert result.intent == "unknown"
-    assert result.date_info is not None
-    assert result.date_info.method == "fallback_default"
-    assert result.date_info.start_date is not None  # Should have today's date
-    assert result.filters is not None
-    assert result.filters.participants == []  # Check default value
-    assert result.confidence == 0.2
+@patch('openai.AsyncClient')
+@patch('sa.nlp.llm_provider.logger')
+def test_from_settings_override(mock_logger, mock_AsyncClient, mock_settings_override):
+    """Test factory uses explicitly overridden settings."""
+    # Act
+    provider = LLMProvider.from_settings(mock_settings_override)
 
+    # Assert
+    assert provider.api_key == "override_api_key"
+    assert provider.base_url == "http://custom-override.com/api"
+    assert provider.model == "custom-model-override"
+    # No default URL log, no missing key warning expected
+    mock_logger.info.assert_any_call(
+         "Creating LLMProvider from settings: model='custom-model-override', base_url='http://custom-override.com/api'"
+    )
+    # Check other logs weren't called unexpectedly
+    assert mock_logger.info.call_count == 1 # Only the creation log
+    mock_logger.warning.assert_not_called()
+    mock_AsyncClient.assert_called_once_with(
+        api_key="override_api_key",
+        base_url="http://custom-override.com/api"
+    )
+
+# Test Direct __init__ (Minimal checks as factory is preferred)
+# ==============================================================
+
+@patch('openai.AsyncClient')
+def test_direct_init_basic(mock_AsyncClient):
+    """Test direct initialization assigns values correctly."""
+    provider = LLMProvider(
+        api_key="direct_key",
+        base_url="http://direct.init/v1",
+        model="direct_init_model"
+    )
+    assert provider.api_key == "direct_key"
+    assert provider.base_url == "http://direct.init/v1"
+    assert provider.model == "direct_init_model"
+    mock_AsyncClient.assert_called_once_with(
+        api_key="direct_key",
+        base_url="http://direct.init/v1"
+    )
+
+@patch('openai.AsyncClient', side_effect=Exception("Client init failed"))
+def test_direct_init_client_exception(mock_AsyncClient):
+    """Test RuntimeError is raised if AsyncClient initialization fails during direct init."""
+    with pytest.raises(RuntimeError, match="Failed to initialize OpenAI client: Client init failed"):
+        LLMProvider(api_key="key", base_url="url", model="model")
+
+def test_direct_init_missing_args():
+    """Test direct initialization raises ValueError if required args are missing/empty."""
+    with pytest.raises(ValueError, match="LLMProvider requires a base_url."):
+        LLMProvider(api_key="key", base_url="", model="model") # Empty base_url
+    with pytest.raises(ValueError, match="LLMProvider requires a base_url."):
+        LLMProvider(api_key="key", base_url=None, model="model") # None base_url (type hint allows None, but logic checks)
+
+    with pytest.raises(ValueError, match="LLMProvider requires a model identifier."):
+        LLMProvider(api_key="key", base_url="url", model="") # Empty model
+    with pytest.raises(ValueError, match="LLMProvider requires a model identifier."):
+        LLMProvider(api_key="key", base_url="url", model=None) # None model (type hint allows None, but logic checks)
+
+# --- Test _generate_json Method ---
+# These tests require mocking the instance's client attribute
+
+@pytest.fixture
+def provider_instance(mock_settings_local):
+    """Provides a provider instance initialized with local settings for testing methods."""
+    # We patch the client *during* fixture setup to avoid needing it everywhere
+    with patch('openai.AsyncClient') as mock_client_constructor:
+        # Configure the mock constructor to return an AsyncMock instance
+        # Use spec=True instead of the potentially already mocked class
+        mock_async_client = AsyncMock(spec=True)
+
+        # Explicitly define the expected attribute structure for the mock
+        # because spec=True makes it strict.
+        mock_async_client.chat = MagicMock()
+        mock_async_client.chat.completions = MagicMock()
+        # Assign an AsyncMock here; tests will configure its return/side effect
+        mock_async_client.chat.completions.create = AsyncMock()
+
+        mock_client_constructor.return_value = mock_async_client
+        provider = LLMProvider.from_settings(mock_settings_local)
+        # Attach the mock client instance for later use in tests
+        provider.mock_client_instance = mock_async_client
+        return provider
 
 @pytest.mark.asyncio
-@patch("openai.AsyncClient", new_callable=AsyncMock)
-async def test_unit_parse_scheduling_query_api_error(
-    mock_async_client_class: AsyncMock, llm_provider: LLMProvider
-):
-    """Unit test fallback logic when LLM API call raises an error."""
-    query = "Meeting friday"
+async def test_generate_json_success(provider_instance):
+    """Test successful JSON generation and parsing."""
+    # Arrange
+    mock_response = MagicMock()
+    mock_message = MagicMock()
+    mock_message.content = json.dumps({"result": "success", "data": [1, 2]})
+    mock_response.choices = [MagicMock(message=mock_message)]
 
-    # Check if openai module is available before trying to use its exceptions
-    api_error = None
-    if openai:
-        api_error = openai.APIConnectionError(request=AsyncMock())  # Use a mock request
+    provider_instance.mock_client_instance.chat.completions.create = AsyncMock(return_value=mock_response)
 
-    # Simulate LLM failure by raising an API error
-    mock_client_instance = AsyncMock()
-    mock_client_instance.chat.completions.create = AsyncMock(side_effect=api_error)
-    llm_provider.client = mock_client_instance
+    # Act
+    result = await provider_instance._generate_json("system prompt", "user message")
 
-    # Call the method under test
-    result = await llm_provider.parse_scheduling_query(query)
-
-    # Assertions
-    assert result is not None
-    mock_client_instance.chat.completions.create.assert_awaited_once()  # LLM call was attempted
-
-    # Check attributes directly on the Pydantic model
-    assert result.method == "fallback_default"
-    assert result.intent == "unknown"
-    assert result.date_info is not None
-    assert result.date_info.method == "fallback_default"
-    assert result.date_info.start_date is not None  # Should have today's date
-    assert result.filters is not None
-    assert result.filters.participants == []  # Check default value
-    assert result.confidence == 0.2
-
+    # Assert
+    assert result == {"result": "success", "data": [1, 2], "method": "llm"} # Check method added
+    provider_instance.mock_client_instance.chat.completions.create.assert_awaited_once_with(
+        model="local-test-model",
+        messages=[
+            {"role": "system", "content": "system prompt"},
+            {"role": "user", "content": "user message"},
+        ],
+        temperature=0,
+        response_format={"type": "json_object"},
+    )
 
 @pytest.mark.asyncio
-@patch("openai.AsyncClient", new_callable=AsyncMock)
-async def test_unit_parse_scheduling_query_rate_limit_error(
-    mock_async_client_class: AsyncMock, llm_provider: LLMProvider
-):
-    """Unit test fallback logic when LLM API call raises a RateLimitError."""
-    query = "Another meeting"
+@patch('sa.nlp.llm_provider.logger')
+async def test_generate_json_parsing_error(mock_logger, provider_instance):
+    """Test handling of invalid JSON response from LLM."""
+    # Arrange
+    mock_response = MagicMock()
+    mock_message = MagicMock()
+    mock_message.content = "This is not JSON {"
+    mock_response.choices = [MagicMock(message=mock_message)]
+    provider_instance.mock_client_instance.chat.completions.create = AsyncMock(return_value=mock_response)
 
-    # Check if openai module and specific error are available
-    api_error = None
-    if openai and hasattr(openai, "RateLimitError"):
-        # RateLimitError requires a response and body
-        mock_response = MagicMock()
-        mock_response.status_code = 429
-        api_error = openai.RateLimitError(
-            message="Rate limit exceeded",
-            response=mock_response,
-            body={"error": {"code": "rate_limit_exceeded"}},
+    # Act
+    result = await provider_instance._generate_json("system prompt", "user message")
+
+    # Assert
+    assert result is None
+    mock_logger.warning.assert_called_once()
+    assert "Invalid JSON received from LLM" in mock_logger.warning.call_args[0][0]
+    assert mock_logger.warning.call_args.kwargs['raw_content'] == "This is not JSON {"
+
+@pytest.mark.asyncio
+@patch('sa.nlp.llm_provider.logger')
+async def test_generate_json_api_connection_error(mock_logger, provider_instance):
+    """Test handling of API connection errors."""
+    # Arrange
+    # Provide the required 'request' argument for APIConnectionError
+    provider_instance.mock_client_instance.chat.completions.create.side_effect = openai.APIConnectionError(
+        request=MagicMock() # Provide a mock request object
+    )
+
+    # Act
+    result = await provider_instance._generate_json("system prompt", "user message")
+
+    # Assert
+    assert result is None
+    mock_logger.exception.assert_called_with("LLM API connection error")
+
+@pytest.mark.asyncio
+@patch('sa.nlp.llm_provider.logger')
+async def test_generate_json_rate_limit_error(mock_logger, provider_instance):
+    """Test handling of rate limit errors."""
+    # Arrange
+    provider_instance.mock_client_instance.chat.completions.create = AsyncMock(
+        side_effect=openai.RateLimitError(
+            "Rate limit exceeded", response=MagicMock(), body=None
         )
+    )
 
-    # Simulate LLM failure by raising the error
-    mock_client_instance = AsyncMock()
-    mock_client_instance.chat.completions.create = AsyncMock(side_effect=api_error)
-    llm_provider.client = mock_client_instance
+    # Act
+    result = await provider_instance._generate_json("system prompt", "user message")
 
-    # Call the method under test
-    result = await llm_provider.parse_scheduling_query(query)
-
-    # Assertions: Expect fallback behavior
-    assert result is not None
-    mock_client_instance.chat.completions.create.assert_awaited_once()  # LLM call attempted
-    assert result.method == "fallback_default"
-    assert result.intent == "unknown"
-    assert result.confidence == 0.2
+    # Assert
+    assert result is None
+    mock_logger.exception.assert_called_with("LLM API rate limit exceeded")
 
 
 @pytest.mark.asyncio
-@patch("openai.AsyncClient", new_callable=AsyncMock)
-async def test_unit_parse_scheduling_query_authentication_error(
-    mock_async_client_class: AsyncMock, llm_provider: LLMProvider
-):
-    """Unit test fallback logic when LLM API call raises an AuthenticationError."""
-    query = "Secret meeting"
-
-    # Check if openai module and specific error are available
-    api_error = None
-    if openai and hasattr(openai, "AuthenticationError"):
-        # AuthenticationError requires a response and body
-        mock_response = MagicMock()
-        mock_response.status_code = 401
-        api_error = openai.AuthenticationError(
-            message="Incorrect API key provided",
-            response=mock_response,
-            body={"error": {"code": "invalid_api_key"}},
+@patch('sa.nlp.llm_provider.logger')
+async def test_generate_json_authentication_error(mock_logger, provider_instance):
+    """Test handling of authentication errors."""
+    # Arrange
+    provider_instance.mock_client_instance.chat.completions.create = AsyncMock(
+        side_effect=openai.AuthenticationError(
+            "Invalid API key", response=MagicMock(), body=None
         )
+    )
 
-    # Simulate LLM failure by raising the error
-    mock_client_instance = AsyncMock()
-    mock_client_instance.chat.completions.create = AsyncMock(side_effect=api_error)
-    llm_provider.client = mock_client_instance
+    # Act
+    result = await provider_instance._generate_json("system prompt", "user message")
 
-    # Call the method under test
-    result = await llm_provider.parse_scheduling_query(query)
-
-    # Assertions: Expect fallback behavior
-    assert result is not None
-    mock_client_instance.chat.completions.create.assert_awaited_once()  # LLM call attempted
-    assert result.method == "fallback_default"
-    assert result.intent == "unknown"
-    assert result.confidence == 0.2
-
+    # Assert
+    assert result is None
+    mock_logger.exception.assert_called_with("LLM API authentication error")
 
 @pytest.mark.asyncio
-@patch("openai.AsyncClient", new_callable=AsyncMock)
-async def test_unit_parse_scheduling_query_invalid_json(
-    mock_async_client_class: AsyncMock, llm_provider: LLMProvider
-):
-    """Unit test fallback logic when LLM returns syntactically invalid JSON."""
-    query = "Meeting with Bob later"
+@patch('sa.nlp.llm_provider.logger')
+async def test_generate_json_api_status_error(mock_logger, provider_instance):
+    """Test handling of generic API status errors."""
+    # Arrange
+    mock_api_response = MagicMock()
+    mock_api_response.status_code = 500
+    provider_instance.mock_client_instance.chat.completions.create = AsyncMock(
+        side_effect=openai.APIStatusError(
+            "Server error", response=mock_api_response, body=None
+        )
+    )
 
-    # Simulate LLM returning invalid JSON string
-    mock_client_instance = AsyncMock()
-    mock_invalid_response = AsyncMock()
-    mock_choice = AsyncMock()
-    mock_choice.message = AsyncMock()
-    # Malformed JSON (e.g., missing closing brace for date_info)
-    mock_choice.message.content = '{"intent": "create_event", "date_info": {"start_date": "today"'
-    mock_invalid_response.choices = [mock_choice]
+    # Act
+    result = await provider_instance._generate_json("system prompt", "user message")
 
-    mock_client_instance.chat.completions.create = AsyncMock(return_value=mock_invalid_response)
-    llm_provider.client = mock_client_instance
-
-    # Call the method under test
-    result = await llm_provider.parse_scheduling_query(query)
-
-    # Assertions
-    assert result is not None
-    mock_client_instance.chat.completions.create.assert_awaited_once()  # LLM call was attempted
-
-    # Check that the fallback was used
-    assert result.method == "fallback_default"
-    assert result.intent == "unknown"
-    assert result.date_info is not None
-    assert result.date_info.method == "fallback_default"
-    assert result.date_info.start_date is not None  # Check presence of date
-    assert result.filters is not None
-    assert result.filters.participants == []  # Check default value
-    assert result.confidence == 0.2
-
-
-# TODO: Add unit tests for:
-# - LLM returning invalid JSON
-# - Different intents being parsed correctly from mock LLM response
-# - Cases where only filters are found, or only date_info
-
-# --- Tests for _get_fallback_date_result --- #
-
-
-@patch("scheduling_agent.core.llm_provider.dateparser.parse")
-def test_unit_fallback_date_result_success(mock_dateparser_parse, llm_provider: LLMProvider):
-    """Unit test _get_fallback_date_result successful parsing."""
-    query = "Meeting next Tuesday at 5pm"
-    # Mock dateparser.parse to return a specific datetime
-    mock_dt = datetime(2024, 6, 11, 17, 0, 0, tzinfo=UTC)
-    mock_dateparser_parse.return_value = mock_dt
-
-    result_dict = llm_provider._get_fallback_date_result(query)
-
-    mock_dateparser_parse.assert_called_once()
-    assert result_dict == {
-        "start_date": "2024-06-11",
-        "end_date": "2024-06-11",
-        "confidence": 0.6,
-        "method": "fallback_dateparser",
-    }
-
-
-@patch("scheduling_agent.core.llm_provider.dateparser.parse")
-def test_unit_fallback_date_result_parse_fail(mock_dateparser_parse, llm_provider: LLMProvider):
-    """Unit test _get_fallback_date_result when dateparser fails to parse."""
-    query = "Some random text without dates"
-    # Mock dateparser.parse to return None (failure)
-    mock_dateparser_parse.return_value = None
-
-    # Use freezegun or similar if exact date matters, otherwise check structure
-    today_iso = datetime.now(UTC).date().isoformat()
-
-    result_dict = llm_provider._get_fallback_date_result(query)
-
-    mock_dateparser_parse.assert_called_once()
-    assert result_dict == {
-        "start_date": today_iso,
-        "end_date": today_iso,
-        "confidence": 0.3,
-        "method": "fallback_default",
-    }
-
-
-@patch("scheduling_agent.core.llm_provider.dateparser.parse")
-def test_unit_fallback_date_result_exception(mock_dateparser_parse, llm_provider: LLMProvider):
-    """Unit test _get_fallback_date_result when dateparser raises an exception."""
-    query = "Data that causes issues"
-    # Mock dateparser.parse to raise an exception
-    mock_dateparser_parse.side_effect = ValueError("Parsing error")
-
-    # Use freezegun or similar if exact date matters, otherwise check structure
-    today_iso = datetime.now(UTC).date().isoformat()
-
-    result_dict = llm_provider._get_fallback_date_result(query)
-
-    mock_dateparser_parse.assert_called_once()
-    assert result_dict == {
-        "start_date": today_iso,
-        "end_date": today_iso,
-        "confidence": 0.1,
-        "method": "fallback_error",
-    }
-
-
-# --- Tests for parse_scheduling_query using fallback --- #
-
+    # Assert
+    assert result is None
+    mock_logger.exception.assert_called_with(
+        "LLM API status error: 500", response=mock_api_response
+    )
 
 @pytest.mark.asyncio
-@patch("scheduling_agent.core.llm_provider.LLMProvider._generate_json")
-@patch("scheduling_agent.core.llm_provider.LLMProvider._get_fallback_date_result")
-async def test_unit_parse_scheduling_query_uses_fallback_on_llm_failure(
-    mock_fallback, mock_generate_json, llm_provider: LLMProvider
-):
-    """Verify fallback is called when _generate_json returns None."""
-    query = "Schedule lunch"
-    mock_generate_json.return_value = None  # Simulate LLM failure
+@patch('sa.nlp.llm_provider.logger')
+async def test_generate_json_unexpected_error(mock_logger, provider_instance):
+    """Test handling of unexpected errors during API call."""
+    # Arrange
+    provider_instance.mock_client_instance.chat.completions.create = AsyncMock(
+        side_effect=Exception("Something totally unexpected")
+    )
 
-    # Mock the fallback return value
-    fallback_return = {
-        "start_date": "2024-07-01",
-        "end_date": "2024-07-01",
-        "method": "fallback_dateparser",
-    }
-    mock_fallback.return_value = fallback_return
+    # Act
+    result = await provider_instance._generate_json("system prompt", "user message")
 
-    result = await llm_provider.parse_scheduling_query(query)
-
-    mock_generate_json.assert_awaited_once_with(ANY, query)
-    mock_fallback.assert_called_once_with(query)
-
-    assert result.method == "fallback_dateparser"
-    assert result.intent == "unknown"
-    assert result.confidence == 0.2
-    assert result.date_info.start_date == "2024-07-01"
-    assert result.date_info.end_date == "2024-07-01"
-
+    # Assert
+    assert result is None
+    mock_logger.exception.assert_called_with("Unexpected error during LLM API call")
 
 @pytest.mark.asyncio
-@patch("scheduling_agent.core.llm_provider.LLMProvider._generate_json")
-@patch("scheduling_agent.core.llm_provider.LLMProvider._get_fallback_date_result")
-async def test_unit_parse_scheduling_query_uses_fallback_on_validation_error(
-    mock_fallback, mock_generate_json, llm_provider: LLMProvider
-):
-    """Verify fallback is called when LLM response fails Pydantic validation."""
-    query = "Book meeting for tomorrow"
-    # Simulate LLM returning invalid structure (invalid type for confidence)
-    llm_output = {
-        "intent": "create_event",  # Provide intent but make confidence invalid
-        "date_info": {"start_date": "2024-07-02"},
-        "confidence": "not-a-float",  # Invalid type
-    }
-    mock_generate_json.return_value = llm_output
+@patch('sa.nlp.llm_provider.logger')
+async def test_generate_json_no_choices(mock_logger, provider_instance):
+    """Test handling response with no choices."""
+    # Arrange
+    mock_response = MagicMock()
+    mock_response.choices = [] # Empty choices list
+    provider_instance.mock_client_instance.chat.completions.create = AsyncMock(return_value=mock_response)
 
-    # Mock the fallback return value
-    fallback_return = {
-        "start_date": "2024-07-02",
-        "end_date": "2024-07-02",
-        "method": "fallback_dateparser",
-        "confidence": 0.6,  # Not used directly by parse_scheduling_query
-    }
-    mock_fallback.return_value = fallback_return
+    # Act
+    result = await provider_instance._generate_json("system prompt", "user message")
 
-    result = await llm_provider.parse_scheduling_query(query)
+    # Assert
+    assert result is None
+    mock_logger.warning.assert_called_with(
+        "LLM response structure missing expected parts (choices or message)."
+    )
 
-    mock_generate_json.assert_awaited_once_with(ANY, query)
-    mock_fallback.assert_called_once_with(query)
+@pytest.mark.asyncio
+@patch('sa.nlp.llm_provider.logger')
+async def test_generate_json_no_message(mock_logger, provider_instance):
+    """Test handling response with choice but no message."""
+    # Arrange
+    mock_response = MagicMock()
+    # Choice exists, but message attribute is None
+    mock_response.choices = [MagicMock(message=None)]
+    provider_instance.mock_client_instance.chat.completions.create = AsyncMock(return_value=mock_response)
 
-    assert result.method == "fallback_dateparser"
-    assert result.intent == "unknown"
-    assert result.confidence == 0.2  # Fallback confidence overrides LLM/fallback confidence
-    assert result.date_info.start_date == "2024-07-02"
-    assert result.date_info.end_date == "2024-07-02"
+    # Act
+    result = await provider_instance._generate_json("system prompt", "user message")
+
+    # Assert
+    assert result is None
+    mock_logger.warning.assert_called_with(
+        "LLM response structure missing expected parts (choices or message)."
+    )
+
+@pytest.mark.asyncio
+@patch('sa.nlp.llm_provider.logger')
+async def test_generate_json_none_content(mock_logger, provider_instance):
+    """Test handling response with message but None content."""
+    # Arrange
+    mock_response = MagicMock()
+    mock_message = MagicMock()
+    mock_message.content = None # Content is explicitly None
+    mock_response.choices = [MagicMock(message=mock_message)]
+    provider_instance.mock_client_instance.chat.completions.create = AsyncMock(return_value=mock_response)
+
+    # Act
+    result = await provider_instance._generate_json("system prompt", "user message")
+
+    # Assert
+    assert result is None
+    mock_logger.warning.assert_called_with("Received None content from LLM.") 
