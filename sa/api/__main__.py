@@ -67,12 +67,11 @@ async def _get_request_details(request: Request) -> tuple[Any | None, dict[str, 
         )
     return request_id, params
 
-def main() -> tuple[FastAPI, Settings]:
+def main(settings: Settings) -> FastAPI:
     """Main entry point for the A2A Scheduling Agent API.
        Initializes settings, logging, lifespan, app, middleware, handlers, routers.
        Returns the configured app and settings.
     """
-    settings = Settings()
     setup_logging(settings)
 
     @asynccontextmanager
@@ -80,13 +79,8 @@ def main() -> tuple[FastAPI, Settings]:
         # Initialize resources on startup
         logger.info("Lifespan startup: Initializing resources...")
 
-        # 0. Settings
-        app.state.settings = settings
-        logger.info("Settings initialized.")
-
-        # 1. Database Service
-        app.state.db_service = DatabaseService.from_settings(settings)
-        logger.info("DatabaseService initialized.")
+        # Note: DB Service and tables are initialized *before* lifespan starts
+        # via the startup event handler below.
 
         # 2. Core Utilities & Providers
         app.state.date_utils = DateUtils()
@@ -134,6 +128,14 @@ def main() -> tuple[FastAPI, Settings]:
         description="An A2A Agent for scheduling and calendar management.",
         lifespan=lifespan,
     )
+
+    # 0. Settings
+    app.state.settings = settings
+    logger.info("Settings initialized.")
+
+    # 1. Database Service
+    app.state.db_service = DatabaseService.from_settings(settings)
+    logger.info("DatabaseService initialized.")
 
     # --- Add Middleware ---
     app.add_middleware(APIKeyAuthMiddleware)
@@ -312,14 +314,15 @@ def main() -> tuple[FastAPI, Settings]:
         """Basic endpoint to check if the API is running."""
         return {"message": "A2A Scheduling Agent is running."}
 
-    # Return both the app and the settings instance
-    return app, settings
+    return app
 
 if __name__ == "__main__":
     import uvicorn
+    settings = Settings()
+
 
     # Call main to get the app and settings
-    app, settings = main()
+    app = main(settings)
 
     logger.info(
         f"Starting Uvicorn server on {settings.server_host}:{settings.server_port}",

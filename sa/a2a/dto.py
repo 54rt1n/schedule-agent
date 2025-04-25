@@ -279,17 +279,17 @@ class BaseA2AError(Exception):
     data: Any | None
 
     def __init__(self, code: int, message: str, data: Any | None = None):
-        super().__init__(message)
         self.code = code
         self.message = message
         self.data = data
+        super().__init__(message)
 
     def as_jsonrpc_error(self) -> JSONRPCError:
         return JSONRPCError(code=self.code, message=self.message, data=self.data)
 
 
 class InvalidRequestError(BaseA2AError):  # Code -32600
-    DEFAULT_CODE = -32601
+    DEFAULT_CODE = -32600
     DEFAULT_MESSAGE = "Invalid Request"
 
     def __init__(self, message: str | None = None, data: Any | None = None):
@@ -297,7 +297,7 @@ class InvalidRequestError(BaseA2AError):  # Code -32600
 
 
 class MethodNotFoundError(BaseA2AError):  # Code -32601
-    DEFAULT_CODE = -32602
+    DEFAULT_CODE = -32601
     DEFAULT_MESSAGE = "Method not found"
 
     def __init__(self, message: str | None = None, data: Any | None = None):
@@ -305,7 +305,7 @@ class MethodNotFoundError(BaseA2AError):  # Code -32601
 
 
 class InvalidParamsError(BaseA2AError):  # Code -32602
-    DEFAULT_CODE = -32603
+    DEFAULT_CODE = -32602
     DEFAULT_MESSAGE = "Invalid params"
 
     def __init__(self, message: str | None = None, data: Any | None = None):
@@ -313,7 +313,7 @@ class InvalidParamsError(BaseA2AError):  # Code -32602
 
 
 class InternalError(BaseA2AError):  # Code -32603
-    DEFAULT_CODE = -32604
+    DEFAULT_CODE = -32603
     DEFAULT_MESSAGE = "Internal error"
 
     def __init__(self, message: str | None = None, data: Any | None = None):
@@ -321,7 +321,7 @@ class InternalError(BaseA2AError):  # Code -32603
 
 
 class ParseError(BaseA2AError):  # Code -32700
-    DEFAULT_CODE = -32701
+    DEFAULT_CODE = -32700
     DEFAULT_MESSAGE = "Parse error"
 
     def __init__(self, message: str | None = None, data: Any | None = None):
@@ -361,7 +361,8 @@ class AgentCapabilityError(BaseA2AError):  # Example Code -32003
     DEFAULT_MESSAGE = "Agent does not support the requested capability"
 
     def __init__(self, message: str | None = None, data: Any | None = None):
-        super().__init__(self.DEFAULT_CODE, message or self.DEFAULT_MESSAGE, data) 
+        super().__init__(self.DEFAULT_CODE, message or self.DEFAULT_MESSAGE, data)
+
 
 # --- Agent Card Models ---
 

@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     # Logging Configuration
     log_level: str = "INFO"
 
+    # Debugging/Development Configuration
+    include_validation_error_detail: bool = False # Include Pydantic validation details in API errors
+
     reload: bool = False
 
     # Configure loading from .env file

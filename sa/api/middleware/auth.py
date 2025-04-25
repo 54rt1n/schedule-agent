@@ -18,7 +18,15 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
         if request.url.path.startswith("/.well-known"):
             return await call_next(request)
 
-        settings = Settings()
+        # Retrieve settings from application state instead of creating a new instance
+        settings: Settings | None = getattr(request.app.state, "settings", None)
+        if settings is None:
+            # This should not happen if the app is configured correctly
+            logger.error("Settings not found in application state!")
+            return JSONResponse(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                content={"detail": "Internal server error: Configuration missing."},
+            )
 
         # Skip auth if no keys are configured (allows local dev without keys)
         api_keys = settings.api_keys

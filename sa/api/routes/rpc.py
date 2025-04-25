@@ -1,7 +1,7 @@
 # sa/api/routes/rpc.py
 """Routes for JSON-RPC API."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import ValidationError
 
 from sa.a2a.command import (
@@ -218,24 +218,25 @@ async def handle_tasks_cancel(
 
 @router.post("/")
 async def handle_rpc_request(
-    request: JSONRPCRequest,  # Pydantic model handles initial validation
+    fastapi_request: Request, # Inject FastAPI Request object
+    rpc_request: JSONRPCRequest,  # Keep Pydantic model for body validation
     task_manager: SchedulingTaskManager = Depends(get_task_manager),
-    db_service: DatabaseService = Depends(get_db_service),  # Add db_service here too
-    nlp_processor: NLPProcessor = Depends(get_nlp_processor),  # Add nlp_processor here too
+    db_service: DatabaseService = Depends(get_db_service),
+    nlp_processor: NLPProcessor = Depends(get_nlp_processor),
     conflict_resolver: ConflictResolver = Depends(get_conflict_resolver),
-    exporters: dict[str, CalendarExporter] = Depends(
-        get_exporters
-    ),  # Add exporters here too for consistency
-    date_utils: DateUtils = Depends(get_date_utils),  # Inject DateUtils
+    exporters: dict[str, CalendarExporter] = Depends(get_exporters),
+    date_utils: DateUtils = Depends(get_date_utils),
 ) -> JSONRPCResponse:
     """Main JSON-RPC handler, routes based on method."""
-    logger.debug(f"Received RPC request: method={request.method}, request_id={request.id}")
-    request_id = request.id  # Store request id for response
+    # Access settings via app state
+    settings = fastapi_request.app.state.settings
+
+    logger.debug(f"Received RPC request: method={rpc_request.method}, request_id={rpc_request.id}")
+    request_id = rpc_request.id  # Store request id for response
 
     try:
-        if request.method == "tasks/send":
-            parsed_params = TaskSendParams.model_validate(request.params or {})
-            # Call the handler, which now returns a Task object on success or raises A2A exceptions
+        if rpc_request.method == "tasks/send":
+            parsed_params = TaskSendParams.model_validate(rpc_request.params or {})
             result_task = await handle_tasks_send(
                 params=parsed_params,
                 task_manager=task_manager,
@@ -245,55 +246,68 @@ async def handle_rpc_request(
                 date_utils=date_utils,
                 conflict_resolver=conflict_resolver,
             )
-            # Construct success response
             return JSONRPCResponse(id=request_id, result=result_task.model_dump())
 
-        if request.method == "tasks/get":
-            parsed_params = TaskGetParams.model_validate(request.params or {})
-            # Call the handler, which returns a Task object or raises TaskNotFoundError
+        elif rpc_request.method == "tasks/get":
+            parsed_params = TaskGetParams.model_validate(rpc_request.params or {})
             result_task = await handle_tasks_get(params=parsed_params, task_manager=task_manager)
-            # Construct success response
             return JSONRPCResponse(id=request_id, result=result_task.model_dump())
 
-        if request.method == "tasks/cancel":
-            parsed_params = CancelTaskParams.model_validate(request.params or {})
-            # Call the handler, which returns a canceled Task or raises errors
+        elif rpc_request.method == "tasks/cancel":
+            parsed_params = CancelTaskParams.model_validate(rpc_request.params or {})
             result_task = await handle_tasks_cancel(params=parsed_params, task_manager=task_manager)
-            # Construct success response
             return JSONRPCResponse(id=request_id, result=result_task.model_dump())
 
-        logger.warning(f"Unsupported RPC method: {request.method}")
-        raise MethodNotFoundError()
+        else:
+            # If method doesn't match any known method, raise MethodNotFoundError
+            logger.warning(f"Unsupported RPC method requested: {rpc_request.method}")
+            raise MethodNotFoundError(f"Method '{rpc_request.method}' not found.")
 
-    # --- Exception Handling Moved Here --- #
-    except (
-        MethodNotFoundError,
-        InvalidParamsError,
-        TaskNotFoundError,
-        TaskNotCancelableError,
-    ) as e:
-        # Catch specific A2A errors raised by handlers or param validation
-        # Added TaskNotCancelableError
+    # --- Specific A2A Error Handling --- # 
+    except MethodNotFoundError as e:
+        # Explicitly handle MethodNotFoundError first
+        logger.info(f"Method not found: '{e.message}', request_id={request_id}")
+        return JSONRPCResponse(id=request_id, error=e.as_jsonrpc_error())
+    
+    except (InvalidParamsError, TaskNotFoundError, TaskNotCancelableError) as e:
+        # Handle other known A2A application errors
         logger.info(
-            f"A2A Error occurred within RPC handler: error_type={type(e).__name__}, "
+            f"A2A Application Error: error_type={type(e).__name__}, "
             f"code={e.code}, message='{e.message}', request_id={request_id}"
         )
         return JSONRPCResponse(id=request_id, error=e.as_jsonrpc_error())
 
     except ValidationError as ve:
-        # Handle Pydantic validation errors specifically during param parsing *within this handler*
-        logger.exception(
-            f"Invalid parameters for method during handler validation: "
-            f"method={request.method}, error={ve.errors()}, request_id={request_id}"
+        # Handle Pydantic validation errors during param parsing *within this handler*
+        logger.warning(
+            f"Invalid parameters during handler validation: "
+            f"method={rpc_request.method}, error_summary={ve.errors(include_context=False)}, request_id={request_id}"
         )
-        # Sanitize validation error details before creating the A2A error
-        sanitized_errors = []
-        for error in ve.errors():
-            sanitized_error = error.copy()
-            # Convert non-serializable context items to strings
-            if "ctx" in sanitized_error and isinstance(sanitized_error["ctx"], dict):
-                sanitized_error["ctx"] = {k: str(v) for k, v in sanitized_error["ctx"].items()}
-            sanitized_errors.append(sanitized_error)
-
-        err = InvalidParamsError(message="Invalid parameters provided.", data=sanitized_errors)
+        
+        error_data = None # Default to no data
+        if settings.include_validation_error_detail:
+            try:
+                # Safely create data payload ONLY if setting is True
+                error_data = {"details": ve.errors(include_context=False)}
+            except Exception as sanitization_error:
+                logger.exception(f"Failed to sanitize ValidationError details: {sanitization_error}", exc_info=sanitization_error)
+                error_data = {"details": "Failed to serialize validation error details."}
+        
+        err = InvalidParamsError(
+            message="Invalid parameters provided for method.", 
+            data=error_data # Pass potentially None data
+        )
         return JSONRPCResponse(id=request_id, error=err.as_jsonrpc_error())
+    
+    except Exception as e:
+        # Catch-all for unexpected errors within the RPC handlers
+        logger.exception(
+            f"Unexpected internal error processing RPC request: method={rpc_request.method}, "
+            f"error_type={type(e).__name__}, error_message='{str(e)}', request_id={request_id}",
+            exc_info=e
+        )
+        internal_err = InternalError(
+            message="An unexpected internal server error occurred.",
+            data={"method": rpc_request.method, "error_type": type(e).__name__}
+        )
+        return JSONRPCResponse(id=request_id, error=internal_err.as_jsonrpc_error())
