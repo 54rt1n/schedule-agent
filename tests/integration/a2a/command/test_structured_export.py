@@ -8,10 +8,10 @@ from sa.a2a.dto import (
     Message,
     Part,
     TaskState,
-    InvalidParamsError,
     TaskSendParams,
     FileContent,
 )
+from sa.a2a.exceptions import InvalidParamsError
 from sa.a2a.task_manager import SchedulingTaskManager
 from sa.db.dao import EventCreate
 from sa.db.service import DatabaseService

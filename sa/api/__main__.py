@@ -109,11 +109,7 @@ def main(settings: Settings) -> FastAPI:
 
         # 4. Task Manager (needs several dependencies)
         app.state.task_manager = SchedulingTaskManager(
-            nlp_processor=app.state.nlp_processor,
             db_service=app.state.db_service,
-            conflict_resolver=app.state.conflict_resolver,
-            date_utils=app.state.date_utils,
-            exporters=app.state.exporters,
         )
         logger.info("SchedulingTaskManager initialized.")
 

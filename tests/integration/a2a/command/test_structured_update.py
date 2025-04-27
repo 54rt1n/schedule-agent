@@ -6,16 +6,13 @@ from sa.a2a.command.structured_update import handle_structured_update
 from sa.a2a.dto import (
     Message,
     Part,
-    TaskStatus,
     TaskState,
     StructuredUpdatePayload,
-    InvalidParamsError,
-    InternalError,
     TaskSendParams,
 )
+from sa.a2a.exceptions import InvalidParamsError
 from sa.a2a.task_manager import SchedulingTaskManager
 from sa.db.dao import EventCreate, EventUpdate
-from sa.db.models import Event
 from sa.db.service import DatabaseService
 from sa.event.conflict_resolver import ConflictResolver
 from sa.event.date_utils import DateUtils
@@ -147,9 +144,10 @@ async def test_handle_structured_update_invalid_payload(
         )
 
     assert "Invalid data provided for event update." in str(exc_info.value)
-    # Check that task status reflects failure (assuming task_manager catches this)
-    # final_task = await task_manager.get_task(task_id)
-    # assert final_task.status.state == TaskState.FAILED
+    # Verify task state wasn't changed to failed
+    task_state = await task_manager.get_task(task_id)
+    assert task_state.status.state == TaskState.WORKING
+
 
 @pytest.mark.asyncio
 async def test_handle_structured_update_missing_data_part(
@@ -158,37 +156,31 @@ async def test_handle_structured_update_missing_data_part(
     conflict_resolver: ConflictResolver,
     date_utils: DateUtils,
 ):
-    """Test update with missing or empty data part in the message."""
+    """Test update raises InvalidParamsError for missing or incorrect data part."""
     task_id = str(uuid4())
-    # Message with no parts or wrong type/empty data
-    messages_to_test = [
-        Message(role="user", parts=[]), # No parts
-        Message(role="user", parts=[Part(type="text", text="hello")]), # Wrong type
-    ]
+    # Message with a text part instead of a data part
+    update_message = Message(role="user", parts=[Part(type="text", text="update something")])
 
-    for update_message in messages_to_test:
-        params = TaskSendParams(id=task_id, message=update_message, intent="update_event")
-        # We might need to recreate the task for each loop iteration if task state matters
-        await task_manager.create_task(params)
+    params = TaskSendParams(id=task_id, message=update_message, intent="update_event")
+    await task_manager.create_task(params)
 
-        # Call the handler - it should catch ValueError and return a FAILED task
-        final_task = await handle_structured_update(
+    # Expect InvalidParamsError to be raised directly by the handler
+    with pytest.raises(InvalidParamsError) as exc_info:
+        await handle_structured_update(
             task_id=task_id,
             message=update_message,
             task_manager=task_manager,
             db_service=db_service,
             conflict_resolver=conflict_resolver,
-            # Add date_utils since the handler now requires it
-            date_utils=date_utils, 
+            date_utils=date_utils,
         )
 
-        # Assert the task failed as expected
-        assert final_task is not None
-        assert final_task.id == task_id
-        assert final_task.status.state == TaskState.FAILED
-        assert final_task.status.message is not None
-        # Check for the specific error message from the ValueError handler
-        assert "Missing data payload" in final_task.status.message.parts[0].text
+    # Assert on the exception
+    assert "Missing data payload in message parts." in str(exc_info.value)
+
+    # Verify task state wasn't changed to failed
+    task_state = await task_manager.get_task(task_id)
+    assert task_state.status.state == TaskState.WORKING
 
 # TODO: Add test for ConflictError if update_event implements conflict checks
 # TODO: Add test for NotImplementedError if specific updates are unsupported

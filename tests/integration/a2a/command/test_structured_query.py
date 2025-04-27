@@ -1,17 +1,12 @@
 import pytest
 import json
-from uuid import uuid4, UUID
+from uuid import uuid4
 from datetime import datetime, timezone, timedelta
+from pydantic import ValidationError
 
 from sa.a2a.command.structured_query import handle_structured_query
-from sa.a2a.dto import (
-    Message,
-    Part,
-    TaskStatus,
-    TaskState,
-    InvalidParamsError,
-    TaskSendParams,
-)
+from sa.a2a.dto import Message, Part, TaskState, TaskSendParams
+from sa.a2a.exceptions import InvalidParamsError
 from sa.a2a.task_manager import SchedulingTaskManager
 from sa.db.dao import EventCreate, EventQuery
 from sa.db.service import DatabaseService
@@ -98,7 +93,7 @@ async def test_handle_structured_query_invalid_payload(
     task_manager: SchedulingTaskManager,
     db_service: DatabaseService,
 ):
-    """Test query with invalid data structure (e.g., bad date format)."""
+    """Test query raises InvalidParamsError for invalid data structure."""
     task_id = str(uuid4())
     invalid_data = {"start_time": "not-a-real-date"}
     query_message = Message(role="user", parts=[Part(type="data", data=invalid_data)])
@@ -106,18 +101,22 @@ async def test_handle_structured_query_invalid_payload(
     params = TaskSendParams(id=task_id, message=query_message, intent="query_events")
     await task_manager.create_task(params)
 
-    final_task = await handle_structured_query(
-        task_id=task_id,
-        message=query_message,
-        task_manager=task_manager,
-        db_service=db_service,
-    )
+    # Expect InvalidParamsError to be raised directly by the handler
+    with pytest.raises(InvalidParamsError) as exc_info:
+        await handle_structured_query(
+            task_id=task_id,
+            message=query_message,
+            task_manager=task_manager,
+            db_service=db_service,
+        )
 
-    assert final_task is not None
-    assert final_task.id == task_id
-    assert final_task.status.state == TaskState.FAILED
-    assert final_task.status.message is not None
-    assert "Error processing query: Invalid query parameters" in final_task.status.message.parts[0].text
+    # Assert on the exception
+    assert "Invalid query parameters" in str(exc_info.value)
+    assert isinstance(exc_info.value.data, list) # Should contain Pydantic errors
+
+    # Verify task state wasn't changed to failed
+    task_state = await task_manager.get_task(task_id)
+    assert task_state.status.state == TaskState.WORKING
 
 
 @pytest.mark.asyncio
@@ -125,22 +124,26 @@ async def test_handle_structured_query_missing_data_part(
     task_manager: SchedulingTaskManager,
     db_service: DatabaseService,
 ):
-    """Test query with missing or empty data part."""
+    """Test query raises InvalidParamsError for missing or incorrect data part."""
     task_id = str(uuid4())
-    query_message = Message(role="user", parts=[]) # No parts
+    # Use a message with a non-data part type
+    query_message = Message(role="user", parts=[Part(type="text", text="find events")])
 
     params = TaskSendParams(id=task_id, message=query_message, intent="query_events")
     await task_manager.create_task(params)
 
-    final_task = await handle_structured_query(
-        task_id=task_id,
-        message=query_message,
-        task_manager=task_manager,
-        db_service=db_service,
-    )
+    # Expect InvalidParamsError to be raised directly by the handler
+    with pytest.raises(InvalidParamsError) as exc_info:
+        await handle_structured_query(
+            task_id=task_id,
+            message=query_message,
+            task_manager=task_manager,
+            db_service=db_service,
+        )
 
-    assert final_task is not None
-    assert final_task.id == task_id
-    assert final_task.status.state == TaskState.FAILED
-    assert final_task.status.message is not None
-    assert "Error processing query: Missing or invalid data part" in final_task.status.message.parts[0].text 
+    # Assert on the exception
+    assert "Missing or invalid data part" in str(exc_info.value)
+
+    # Verify task state wasn't changed to failed
+    task_state = await task_manager.get_task(task_id)
+    assert task_state.status.state == TaskState.WORKING 

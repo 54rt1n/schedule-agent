@@ -77,19 +77,10 @@ async def db_service(
     return service
 
 @pytest_asyncio.fixture(scope="function")
-async def task_manager(db_service: DatabaseService, date_utils: DateUtils,
-                        conflict_resolver: ConflictResolver, settings: Settings,
-                        exporters: dict[str, CalendarExporter]
-                        ) -> SchedulingTaskManager:
+async def task_manager(db_service: DatabaseService) -> SchedulingTaskManager:
     """Provides a TaskManager instance using the real db_service."""
-    llm_provider = LLMProvider.from_settings(settings=settings)
-    nlp_processor = NLPProcessor(llm_provider=llm_provider, date_utils=date_utils)
     return SchedulingTaskManager(
-        nlp_processor=nlp_processor,
         db_service=db_service,
-        date_utils=date_utils,
-        conflict_resolver=conflict_resolver,
-        exporters=exporters,
     )
 
 @pytest_asyncio.fixture(scope="function")
@@ -136,34 +127,6 @@ def test_session():
     mock_session.close = AsyncMock() # Ensure close is awaitable if needed
 
     return mock_session
-
-
-"""
-old fixtures
-@pytest.fixture
-def mock_db_service(test_session: AsyncSession) -> DatabaseService:
-    mock_service = AsyncMock(spec=DatabaseService)
-
-    @asynccontextmanager
-    async def mock_get_session_cm():
-        session = test_session
-        try:
-            yield session
-        except Exception:
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
-
-    mock_service.get_session.return_value = mock_get_session_cm()
-    return mock_service
-
-@pytest.fixture
-def mock_conflict_resolver() -> AsyncMock:
-    resolver = AsyncMock(spec=ConflictResolver)
-    resolver.detect_conflicts = AsyncMock(return_value=[]) # Default: no conflicts
-    return resolver
-"""
 
 @pytest.fixture
 def nlp_processor(settings: Settings, date_utils: DateUtils) -> NLPProcessor:
@@ -262,28 +225,6 @@ def mock_exporters(mock_ical_exporter, mock_org_exporter):
 @pytest.fixture
 def mock_conflict_resolver() -> AsyncMock:
     return AsyncMock(spec=ConflictResolver)
-
-"""
-@pytest.fixture
-def mock_task_manager() -> AsyncMock:
-    return AsyncMock(spec=SchedulingTaskManager)
-
-@pytest.fixture
-def mock_db_service() -> AsyncMock:
-    mock = AsyncMock(spec=DatabaseService)
-    # Mock the session context manager
-    mock_session = AsyncMock()
-    mock_async_context_manager = AsyncMock()
-    mock_async_context_manager.__aenter__.return_value = mock_session
-    mock.get_session.return_value = mock_async_context_manager
-    # Add mocks for methods called by command handlers
-    mock.delete_event = AsyncMock()
-    mock.find_events = AsyncMock()
-    # Keep existing update_event if present, or add if needed
-    mock.update_event = AsyncMock()
-    return mock
-
-"""
 
 @pytest.fixture
 def sample_event_data() -> dict:

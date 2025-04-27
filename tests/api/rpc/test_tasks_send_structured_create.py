@@ -110,19 +110,22 @@ async def test_rpc_tasks_send_structured_create_conflict(
     # 4. Assertions
     assert response_send.status_code == 200 # JSON-RPC errors use 200 OK
     response_data = response_send.json()
-    # Expect InvalidParamsError (-32602) because the new handler maps ConflictError to it
-    assert "error" in response_data
-    assert response_data.get("result") is None
 
-    error_payload = response_data["error"]
-    assert error_payload["code"] == -32602 # INVALID_PARAMS
-    assert "Scheduling conflict detected" in error_payload["message"]
-    # Check that the data field contains the conflict details added by the handler
-    assert error_payload.get("data") is not None
-    assert "conflicts" in error_payload["data"]
-    assert len(error_payload["data"]["conflicts"]) > 0
-    assert error_payload["data"]["conflicts"][0]["id"] == str(existing_event.id)
-    assert "details" in error_payload["data"]
+    # ConflictError should NOT result in an RPC error, but an input-required task state.
+    assert "result" in response_data
+    assert response_data.get("error") is None
+
+    result_payload = response_data["result"]
+    assert result_payload["id"] == task_id
+    assert result_payload["status"]["state"] == TaskState.INPUT_REQUIRED.value
+    assert "Could not create event due to scheduling conflicts" in result_payload["status"]["message"]["parts"][0]["text"]
+
+    assert len(result_payload["artifacts"]) == 1
+    conflict_artifact = result_payload["artifacts"][0]
+    assert conflict_artifact["name"] == "conflict_info"
+    assert "conflicts" in conflict_artifact["parts"][0]["data"]
+    assert len(conflict_artifact["parts"][0]["data"]["conflicts"]) > 0
+    assert conflict_artifact["parts"][0]["data"]["conflicts"][0]["id"] == str(existing_event.id)
 
 def test_rpc_tasks_send_structured_create_validation_error(
     client: TestClient,

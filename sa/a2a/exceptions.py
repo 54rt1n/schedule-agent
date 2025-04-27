@@ -36,6 +36,10 @@ class BaseA2AError(Exception):
         self.message = message
         self.data = data
 
+    def __str__(self) -> str:
+        """Return the message associated with the error."""
+        return self.message
+
     def as_jsonrpc_error(self) -> JSONRPCError:
         return JSONRPCError(code=self.code, message=self.message, data=self.data)
 

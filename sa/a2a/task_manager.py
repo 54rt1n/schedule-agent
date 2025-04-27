@@ -13,17 +13,14 @@ from sa.a2a.dto import (
     TaskState,
     TaskStatus,
 )
-from sa.a2a.exceptions import TaskNotFoundError, TaskNotCancelableError
+from sa.a2a.exceptions import TaskNotFoundError as A2ATaskNotFoundError, TaskNotCancelableError as A2ATaskNotCancelableError
+from sa.core.exceptions import TaskNotFoundError as CoreTaskNotFoundError
 from sa.core.logging_config import get_logger
 from sa.db.models import A2ATask
 from sa.db.service import DatabaseService
 from sa.db.strategies.get_a2a_task_by_id import GetA2ATaskByIdStrategy
 from sa.db.strategies.save_a2a_task import SaveA2ATaskStrategy
 from sa.db.strategies.update_a2a_task_status import UpdateA2ATaskStatusStrategy
-from sa.event.conflict_resolver import ConflictResolver
-from sa.event.date_utils import DateUtils
-from sa.event.exporters.base import CalendarExporter
-from sa.nlp.nlp_processor import NLPProcessor
 
 logger = get_logger(__name__)
 
@@ -33,21 +30,13 @@ class SchedulingTaskManager:
 
     def __init__(
         self,
-        nlp_processor: NLPProcessor,
         db_service: DatabaseService,
-        conflict_resolver: ConflictResolver,
-        date_utils: DateUtils,
-        exporters: dict[str, CalendarExporter] | None = None,
     ):
         """Initialize the task manager with dependencies and strategies."""
-        self.nlp_processor = nlp_processor
         self.db_service = db_service
         self.get_task_strategy = GetA2ATaskByIdStrategy(db_service=db_service)
         self.save_task_strategy = SaveA2ATaskStrategy(db_service=db_service)
         self.update_status_strategy = UpdateA2ATaskStatusStrategy(db_service=db_service)
-        self.date_utils = date_utils
-        self.exporters = exporters
-        self.conflict_resolver = conflict_resolver
 
         logger.info("SchedulingTaskManager initialized (using DB strategies).")
 
@@ -194,14 +183,14 @@ class SchedulingTaskManager:
                  # This could happen if get_task fails after update or if task somehow disappeared
                  logger.error("Task not found via get_task after status update, potential issue", task_id=task_id)
                  # Raise TaskNotFoundError as the contract implies the task should exist
-                 raise TaskNotFoundError(f"Task {task_id} not found after status update.")
+                 raise A2ATaskNotFoundError(task_id)
 
             logger.debug("Successfully retrieved and converted updated task", task_id=task_id)
             return updated_task
 
-        except TaskNotFoundError: # Propagate TaskNotFoundError from update_status_strategy
+        except CoreTaskNotFoundError: # Catch the specific error from the strategy
              logger.warning("Task not found by UpdateA2ATaskStatusStrategy", task_id=task_id)
-             raise
+             raise A2ATaskNotFoundError(task_id) # Raise the A2A specific error
         except Exception as e:
              logger.exception("Failed during update_task_status execution", task_id=task_id, error=str(e))
              raise # Re-raise other exceptions
@@ -217,7 +206,7 @@ class SchedulingTaskManager:
             # 1. Fetch the current Pydantic Task state using get_task
             task = await self.get_task(task_id)
             if not task:
-                raise TaskNotFoundError(task_id) # get_task handles logging
+                raise A2ATaskNotFoundError(task_id) # get_task handles logging
 
             # 2. Modify the Pydantic Task object
             if task.artifacts is None: # Should be initialized by Pydantic model
@@ -246,7 +235,7 @@ class SchedulingTaskManager:
                  raise RuntimeError(f"Failed to convert saved task {task_id} back for return after adding artifact.")
             return returned_task
 
-        except TaskNotFoundError:
+        except A2ATaskNotFoundError:
              logger.warning("Task not found for adding artifact", task_id=task_id)
              raise
         except Exception as e:
@@ -316,7 +305,7 @@ class SchedulingTaskManager:
         # 1. Get current task state using the refactored get_task
         task = await self.get_task(task_id)
         if not task:
-            raise TaskNotFoundError(task_id) # get_task handles logging
+            raise A2ATaskNotFoundError(task_id) # get_task handles logging
 
         # 2. Check if cancelable
         if task.status.state not in cancelable_states:
@@ -325,7 +314,7 @@ class SchedulingTaskManager:
                 task_id=task_id,
                 current_state=task.status.state,
             )
-            raise TaskNotCancelableError(
+            raise A2ATaskNotCancelableError(
                 f"Task {task_id} is in state {task.status.state} and cannot be canceled."
             )
 

@@ -16,5 +16,3 @@ def test_get_agent_card(client: TestClient):
 
     # Optionally assert specific fields
     # These are example assertions, adjust based on your actual agent card content
-    # assert agent_card_data["name"] == "Scheduling Agent"
-    # assert "create_event" in [skill["id"] for skill in agent_card_data["skills"]] 

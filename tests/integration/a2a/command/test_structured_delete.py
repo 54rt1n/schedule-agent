@@ -8,7 +8,6 @@ from sa.a2a.dto import (
     Part,
     TaskStatus,
     TaskState,
-    InvalidParamsError,
     TaskSendParams,
 )
 from sa.a2a.task_manager import SchedulingTaskManager
@@ -16,6 +15,8 @@ from sa.db.dao import EventCreate, EventDelete
 from sa.db.service import DatabaseService
 from sa.db.strategies.create_event import CreateEventStrategy
 from sa.db.strategies.get_event_by_id import GetEventByIdStrategy
+from sa.a2a.exceptions import InvalidParamsError
+from pydantic import ValidationError
 
 @pytest.mark.asyncio
 async def test_handle_structured_delete_success(
@@ -105,26 +106,32 @@ async def test_handle_structured_delete_invalid_payload(
     task_manager: SchedulingTaskManager,
     db_service: DatabaseService,
 ):
-    """Test delete with invalid payload (e.g., not a UUID)."""
+    """Test delete raises InvalidParamsError with invalid payload (e.g., not a UUID)."""
     task_id = str(uuid4())
     invalid_data = {"id": "not-a-uuid"}
     delete_message = Message(role="user", parts=[Part(type="data", data=invalid_data)])
 
+    # Create the task first
     params = TaskSendParams(id=task_id, message=delete_message, intent="delete_event")
     await task_manager.create_task(params)
 
-    final_task = await handle_structured_delete(
-        task_id=task_id,
-        message=delete_message,
-        task_manager=task_manager,
-        db_service=db_service,
-    )
+    # Expect InvalidParamsError to be raised directly by the handler
+    with pytest.raises(InvalidParamsError) as exc_info:
+        await handle_structured_delete(
+            task_id=task_id,
+            message=delete_message,
+            task_manager=task_manager,
+            db_service=db_service,
+        )
 
-    assert final_task is not None
-    assert final_task.id == task_id
-    assert final_task.status.state == TaskState.FAILED
-    assert final_task.status.message is not None
-    assert "Error processing delete: Invalid delete parameters" in final_task.status.message.parts[0].text
+    # Assert on the exception
+    assert "Invalid delete parameters" in str(exc_info.value)
+    assert isinstance(exc_info.value.data, list) # Should contain Pydantic errors
+    assert isinstance(exc_info.value.__cause__, ValidationError)
+
+    # Verify task state wasn't changed to failed (as error raised before manager called)
+    task_state = await task_manager.get_task(task_id)
+    assert task_state.status.state == TaskState.WORKING
 
 
 @pytest.mark.asyncio
@@ -132,22 +139,27 @@ async def test_handle_structured_delete_missing_data_part(
     task_manager: SchedulingTaskManager,
     db_service: DatabaseService,
 ):
-    """Test delete with missing or incorrect data part."""
+    """Test delete raises InvalidParamsError with missing or incorrect data part."""
     task_id = str(uuid4())
+    # Message part has type="text" instead of type="data"
     delete_message = Message(role="user", parts=[Part(type="text", text="delete something")])
 
+    # Create the task first
     params = TaskSendParams(id=task_id, message=delete_message, intent="delete_event")
     await task_manager.create_task(params)
 
-    final_task = await handle_structured_delete(
-        task_id=task_id,
-        message=delete_message,
-        task_manager=task_manager,
-        db_service=db_service,
-    )
+    # Expect InvalidParamsError to be raised directly by the handler
+    with pytest.raises(InvalidParamsError) as exc_info:
+        await handle_structured_delete(
+            task_id=task_id,
+            message=delete_message,
+            task_manager=task_manager,
+            db_service=db_service,
+        )
 
-    assert final_task is not None
-    assert final_task.id == task_id
-    assert final_task.status.state == TaskState.FAILED
-    assert final_task.status.message is not None
-    assert "Error processing delete: Missing or invalid data part" in final_task.status.message.parts[0].text 
+    # Assert on the exception
+    assert "Missing or invalid data part" in str(exc_info.value)
+
+    # Verify task state wasn't changed to failed
+    task_state = await task_manager.get_task(task_id)
+    assert task_state.status.state == TaskState.WORKING 

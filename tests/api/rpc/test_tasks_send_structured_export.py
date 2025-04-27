@@ -5,22 +5,20 @@ from datetime import datetime, timezone, timedelta
 import base64
 
 from sa.a2a.dto import TaskSendParams, Message, Part, TaskState, FileContent
-from sa.db.dao import EventCreate # Import DAO
-from sa.db.service import DatabaseService # Import for type hint
-from sa.event.date_utils import DateUtils # Import for type hint
-from sa.event.conflict_resolver import ConflictResolver # Import for type hint
-from ..conftest import build_rpc_request, create_db_event # Import updated helper
+from sa.db.dao import EventCreate
+from sa.db.service import DatabaseService
+from sa.event.date_utils import DateUtils
+from sa.event.conflict_resolver import ConflictResolver
+from ..conftest import build_rpc_request, create_db_event
 
-# Remove old API-based helper
-# def _create_test_event(...)
 
-@pytest.mark.asyncio # Mark test as async
+@pytest.mark.asyncio
 async def test_rpc_tasks_send_structured_export_success(
     client: TestClient,
     auth_headers_valid: dict,
-    app_db_service: DatabaseService, # Add needed fixture
-    date_utils: DateUtils, # Add needed fixture
-    conflict_resolver: ConflictResolver # Add needed fixture
+    app_db_service: DatabaseService,
+    date_utils: DateUtils,
+    conflict_resolver: ConflictResolver
 ):
     """Test tasks/send with structured data for export_calendar intent."""
     # 1. Create an event to export using the new DB helper
@@ -34,16 +32,15 @@ async def test_rpc_tasks_send_structured_export_success(
         end_time=end_time,
         time_zone="UTC"
     )
-    created_event = await create_db_event(
+    await create_db_event(
         event_create=event_to_create,
         app_db_service=app_db_service,
         date_utils=date_utils,
-        conflict_resolver=conflict_resolver # Pass the fixture
+        conflict_resolver=conflict_resolver
     )
     target_date = start_time.strftime("%Y-%m-%d")
 
     # 2. Prepare Export Request
-    # ... (rest of the test remains the same)
     task_id = str(uuid.uuid4())
     session_id = str(uuid.uuid4())
     export_data = {
@@ -54,9 +51,9 @@ async def test_rpc_tasks_send_structured_export_success(
     send_params = TaskSendParams(
         id=task_id,
         sessionId=session_id,
-        intent="export_calendar", # Explicit intent
+        intent="export_calendar",
         message=Message(role="user", parts=[
-            Part(type="data", data=export_data) # Structured export data
+            Part(type="data", data=export_data)
         ])
     )
     rpc_export_payload = build_rpc_request("tasks/send", send_params.model_dump())

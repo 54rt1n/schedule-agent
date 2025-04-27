@@ -56,7 +56,7 @@ router = APIRouter()
 # --- Main Handler ---
 async def handle_tasks_send(
     params: TaskSendParams,
-    task_manager: SchedulingTaskManager,
+    task_manager: SchedulingTaskManager = Depends(get_task_manager),
     db_service: DatabaseService = Depends(get_db_service),
     nlp_processor: NLPProcessor = Depends(get_nlp_processor),
     exporters: dict[str, CalendarExporter] = Depends(get_exporters),
@@ -224,8 +224,7 @@ async def handle_tasks_cancel(
 
 @router.post("/")
 async def handle_rpc_request(
-    fastapi_request: Request, # Inject FastAPI Request object
-    rpc_request: JSONRPCRequest,  # Keep Pydantic model for body validation
+    request: JSONRPCRequest,
     task_manager: SchedulingTaskManager = Depends(get_task_manager),
     db_service: DatabaseService = Depends(get_db_service),
     nlp_processor: NLPProcessor = Depends(get_nlp_processor),
@@ -235,15 +234,13 @@ async def handle_rpc_request(
 ) -> JSONRPCResponse:
     """Main JSON-RPC handler, routes based on method."""
     # Access settings via app state
-    settings = fastapi_request.app.state.settings
-
-    logger.debug(f"Received RPC request: method={rpc_request.method}, request_id={rpc_request.id}")
-    request_id = rpc_request.id  # Store request id for response
+    logger.debug(f"Received RPC request: method={request.method}, request_id={request.id}")
+    request_id = request.id  # Store request id for response
 
     try:
         # --- Method Routing ---
-        if rpc_request.method == "tasks/send":
-            parsed_params = TaskSendParams.model_validate(rpc_request.params or {})
+        if request.method == "tasks/send":
+            parsed_params = TaskSendParams.model_validate(request.params or {})
             result_task = await handle_tasks_send(
                 params=parsed_params,
                 task_manager=task_manager,
@@ -255,20 +252,20 @@ async def handle_rpc_request(
             )
             return JSONRPCResponse(id=request_id, result=result_task.model_dump())
 
-        elif rpc_request.method == "tasks/get":
-            parsed_params = TaskGetParams.model_validate(rpc_request.params or {})
+        elif request.method == "tasks/get":
+            parsed_params = TaskGetParams.model_validate(request.params or {})
             result_task = await handle_tasks_get(params=parsed_params, task_manager=task_manager)
             return JSONRPCResponse(id=request_id, result=result_task.model_dump())
 
-        elif rpc_request.method == "tasks/cancel":
-            parsed_params = CancelTaskParams.model_validate(rpc_request.params or {})
+        elif request.method == "tasks/cancel":
+            parsed_params = CancelTaskParams.model_validate(request.params or {})
             result_task = await handle_tasks_cancel(params=parsed_params, task_manager=task_manager)
             return JSONRPCResponse(id=request_id, result=result_task.model_dump())
 
         else:
-            logger.warning(f"Unsupported RPC method requested: {rpc_request.method}")
+            logger.warning(f"Unsupported RPC method requested: {request.method}")
             # Raise the *actual* exception now, not the DTO
-            raise A2AMethodNotFoundError(f"Method '{rpc_request.method}' not found.")
+            raise A2AMethodNotFoundError(f"Method '{request.method}' not found.")
     # These are already A2A errors, so we can raise them directly
     except BaseA2AError as known_error:
         raise known_error
@@ -308,15 +305,13 @@ async def handle_rpc_request(
     except Exception as e:
         # Log the unexpected error
         logger.exception(
-            f"Caught unexpected exception in RPC handler for method {rpc_request.method}: {e}",
+            f"Caught unexpected exception in RPC handler for method {request.method}: {e}",
             exc_info=True
         )
         # Raise the A2AInternalError *exception*.
         # This will be caught by the BaseA2AError handler in __main__.py
         raise A2AInternalError(
-            message=f"Internal server error processing method {rpc_request.method}",
+            message=f"Internal server error processing method {request.method}",
             data={"error_type": type(e).__name__}
         ) from e
 
-    # No need for the comment below anymore as the logic is handled above
-    # # Other exceptions propagate up to FastAPI handlers in __main__.py

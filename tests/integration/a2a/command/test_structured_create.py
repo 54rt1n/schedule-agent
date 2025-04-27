@@ -3,10 +3,8 @@ from uuid import uuid4
 import uuid
 
 from sa.a2a.command.structured_create import handle_structured_create
-from sa.a2a.dto import Message, Part, TaskStatus
+from sa.a2a.dto import Message, Part
 from sa.a2a.task_manager import SchedulingTaskManager
-from sa.db.dao import EventCreate
-from sa.db.models import Event
 from sa.db.service import DatabaseService
 from sa.event.conflict_resolver import ConflictResolver
 from sa.event.date_utils import DateUtils

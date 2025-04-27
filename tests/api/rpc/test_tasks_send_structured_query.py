@@ -46,7 +46,6 @@ async def test_rpc_tasks_send_structured_query_success(
         "start_date": target_date,
         "end_date": target_date
         # Add other query params like title if needed by handler
-        # "title": event_title 
     }
     send_params = TaskSendParams(
         id=task_id,

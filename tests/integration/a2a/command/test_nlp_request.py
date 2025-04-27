@@ -43,10 +43,6 @@ async def test_handle_nlp_request_routes_to_export(
     )
     nlp_processor.parse_natural_language_query = AsyncMock(return_value=mock_nlp_result)
 
-    # Mock handle_structured_export to verify it gets called (optional)
-    # This would require patch from unittest.mock
-    # with patch('sa.a2a.command.nlp_request.handle_structured_export', new_callable=AsyncMock) as mock_export_handler:
-
     params = TaskSendParams(id=task_id, message=nlp_message, intent=None) # Intent determined by NLP
     await task_manager.create_task(params)
 
@@ -74,7 +70,6 @@ async def test_handle_nlp_request_routes_to_export(
 
     # Assert nlp_processor was called
     nlp_processor.parse_natural_language_query.assert_awaited_once_with(query)
-    # mock_export_handler.assert_awaited_once() # If using patch context manager
 
 @pytest.mark.asyncio
 async def test_handle_nlp_request_unhandled_intent(

@@ -8,7 +8,7 @@ from sqlmodel import select
 from typing import Tuple
 
 from sa.core.logging_config import get_logger
-from sa.core.exceptions import TaskNotFoundError
+from sa.core.exceptions import TaskNotFoundError as CoreTaskNotFoundError
 from sa.db.models import A2ATask
 from sa.db.service import DatabaseService
 from sa.db.strategies.base import DatabaseExecutionStrategy
@@ -50,7 +50,7 @@ class UpdateA2ATaskStatusStrategy(DatabaseExecutionStrategy[UpdateStatusInput, N
 
         if not task:
             logger.warning(f"A2A task with ID {task_id} not found for status update.")
-            raise TaskNotFoundError(task_id)
+            raise CoreTaskNotFoundError(task_id)
 
         logger.debug(f"Found task {task_id} for status update.")
 

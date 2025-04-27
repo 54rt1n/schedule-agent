@@ -68,7 +68,5 @@ class NLPProcessor:
         # Return the Pydantic model directly, no conversion to dict
         return llm_result
 
-    # --- Removed _extract_filters and _determine_query_intent methods --- #
-
 
 # End of file

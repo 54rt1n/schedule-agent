@@ -34,9 +34,6 @@ class GetA2ATaskByIdStrategy(DatabaseExecutionStrategy[str, Optional[A2ATask]]):
         task_id = data
         logger.debug(f"Executing GetA2ATaskByIdStrategy for ID: {task_id}")
 
-        # Use session.get for primary key lookup for potential optimization
-        # result = await session.get(A2ATask, task_id) # Alternative
-
         stmt = select(A2ATask).where(A2ATask.id == task_id)
         result = await session.execute(stmt)
         task = result.scalar_one_or_none()

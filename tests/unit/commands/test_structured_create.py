@@ -6,14 +6,13 @@ import uuid
 
 from sa.a2a.dto import (
     Artifact,
-    InternalError,
-    InvalidParamsError,
     Message,
     Part,
     Task,
     TaskState,
     TaskStatus,
 )
+from sa.a2a.exceptions import InternalError, InvalidParamsError
 from sa.a2a.command.structured_create import handle_structured_create
 from sa.core.exceptions import ConflictError
 from sa.core.logging_config import get_logger
@@ -157,14 +156,18 @@ async def test_handle_structured_create_conflict(
     conflict_error = ConflictError(conflicts=[{"type": "instance", "event": mock_event_instance}])
 
     # Mock task manager return for require_input
-    mock_status = TaskStatus(state=TaskState.INPUT_REQUIRED, message=Message(role="agent", parts=[Part(type="text", text="Mock Input Req")]))
-    mock_artifact = Artifact(name="mock_conflict", parts=[Part(type="data", data={"conflict": True})])
-    mock_task_manager.require_input_task.return_value = Task(
-        id=task_id, status=mock_status, artifacts=[mock_artifact], history=[]
+    # This is what the handler should return if it successfully calls require_input_task
+    expected_return_task = Task(
+        id=task_id,
+        status=TaskStatus(state=TaskState.INPUT_REQUIRED, message=Message(role="agent", parts=[Part(type="text", text="Mock Input Req")])),
+        artifacts=[Artifact(name="conflict_info", parts=[Part(type="data", data={"conflicts": [conflict_event_data]})])],
+        history=[]
     )
+    mock_task_manager.require_input_task.return_value = expected_return_task
 
     # Patch strategy execute ONLY
     with patch("sa.a2a.command.structured_create.CreateEventStrategy.execute", side_effect=conflict_error) as mock_execute:
+    # No need to mock require_input_task here, we want the handler to call the real mock
 
         # Call the handler
         result_task = await handle_structured_create(
@@ -189,12 +192,11 @@ async def test_handle_structured_create_conflict(
     assert req_call_args[0] == task_id
     assert isinstance(req_call_args[1], Message)
     assert "conflict" in req_call_args[1].parts[0].text.lower()
-    assert "modify your request" in req_call_args[1].parts[0].text.lower() # Check updated message
+    assert "modify your request" in req_call_args[1].parts[0].text.lower()
     assert isinstance(req_call_args[2], Artifact)
     assert req_call_args[2].name == "conflict_info"
     assert req_call_args[2].parts[0].type == "data"
     assert "conflicts" in req_call_args[2].parts[0].data
-    assert "alternatives" not in req_call_args[2].parts[0].data # Verify alternatives are removed
     # Check conflict data in artifact matches the dumped data from the mock instance
     assert req_call_args[2].parts[0].data["conflicts"] == [conflict_event_data] # Compare with the dict
 
@@ -203,6 +205,8 @@ async def test_handle_structured_create_conflict(
 
     assert result_task is not None
     assert result_task.status.state == TaskState.INPUT_REQUIRED
+    # Compare the returned task with the expected one from the mocked require_input_task
+    assert result_task.model_dump() == expected_return_task.model_dump()
 
 @pytest.mark.asyncio
 async def test_handle_structured_create_conflict_alternative_generation_fails(

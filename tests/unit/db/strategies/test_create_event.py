@@ -249,15 +249,14 @@ async def test_create_event_conflict_detected(
             get_events_in_range_strategy=MockGetEventsInRangeStrat()
         )
 
-        # Expect DatabaseError wrapping ConflictError
-        with pytest.raises(DatabaseError) as exc_info:
+        # Expect ConflictError directly, not wrapped in DatabaseError
+        with pytest.raises(ConflictError) as exc_info:
             await strategy.execute(data=event_create_data)
-        assert isinstance(exc_info.value.__cause__, ConflictError)
 
         # Verify conflict resolver was called with the potential conflicts
         mock_conflict_resolver.detect_conflicts.assert_awaited_once_with(event_create_data, [mock_potential_conflict])
-        # Verify the underlying error contains the conflicts
-        assert exc_info.value.__cause__.conflicts == mock_conflict_list
+        # Verify the error contains the conflicts directly in the 'data' attribute
+        assert exc_info.value.data == mock_conflict_list
         mock_db_service.mock_session.commit.assert_not_awaited() # Should not commit on error
         mock_db_service.mock_session.rollback.assert_awaited_once() # Base class rollback
 

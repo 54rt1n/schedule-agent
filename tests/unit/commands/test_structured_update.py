@@ -12,9 +12,8 @@ from sa.a2a.dto import (
     Part,
     Artifact,
     TaskStatus,
-    InvalidParamsError,
-    InternalError,
 )
+from sa.a2a.exceptions import InternalError, InvalidParamsError
 from sa.a2a.command.structured_update import handle_structured_update
 from sa.core.exceptions import ConflictError
 from sa.db.dao import EventUpdate
@@ -373,9 +372,8 @@ async def test_handle_structured_update_validation_error(
     assert isinstance(exc_info.value.data, list) # Pydantic error list
     assert isinstance(exc_info.value.__cause__, ValidationError)
 
-    # Assert strategy and db_service were not called
+    # Assert strategy and task manager were not called
     mock_update_strategy_class.assert_not_called()
-
     mock_task_manager.complete_task.assert_not_called()
     mock_task_manager.fail_task.assert_not_called()
     mock_task_manager.require_input_task.assert_not_called()
@@ -415,10 +413,9 @@ async def test_handle_structured_update_internal_error(
     assert "An unexpected error occurred while updating event." in str(exc_info.value)
     assert exc_info.value.__cause__ is original_exception
 
-    # Assert strategy was called, db_service was not
+    # Assert strategy was called, but task manager was not
     mock_update_strategy_class.assert_called_once_with(db_service=mock_db_service, conflict_resolver=conflict_resolver, date_utils=date_utils)
     mock_update_strategy_instance.execute.assert_awaited_once_with(data=(event_id, ANY))
-
     mock_task_manager.complete_task.assert_not_called()
     mock_task_manager.fail_task.assert_not_called()
     mock_task_manager.require_input_task.assert_not_called()

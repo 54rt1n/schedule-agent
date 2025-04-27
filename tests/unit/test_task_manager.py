@@ -13,8 +13,9 @@ from sa.a2a.dto import (
     TaskState,
     TaskStatus,
 )
+from sa.a2a.exceptions import TaskNotFoundError as A2ATaskNotFoundError, TaskNotCancelableError as A2ATaskNotCancelableError
 from sa.a2a.task_manager import SchedulingTaskManager
-from sa.core.exceptions import TaskNotFoundError, TaskNotCancelableError
+from sa.core.exceptions import TaskNotFoundError as CoreTaskNotFoundError
 from sa.core.logging_config import get_logger
 from sa.db.models import A2ATask
 from sa.db.strategies.get_a2a_task_by_id import GetA2ATaskByIdStrategy
@@ -112,73 +113,15 @@ def mock_exporters(mock_ical_exporter: MagicMock, mock_org_exporter: MagicMock) 
 # Updated Task Manager Fixture
 @pytest.fixture
 def task_manager(
-    mock_nlp_processor: AsyncMock,
-    mock_exporters: dict,
-    conflict_resolver: ConflictResolver,
-    date_utils: DateUtils,
     db_service: DatabaseService,
     initialize_db: None,
 ) -> SchedulingTaskManager:
     """Provides a SchedulingTaskManager instance using the real db_service."""
-    manager = SchedulingTaskManager(
-        nlp_processor=mock_nlp_processor,
-        db_service=db_service,
-        date_utils=date_utils,
-        conflict_resolver=conflict_resolver,
-        exporters=mock_exporters,
-    )
-    # The manager now internally creates real strategies using the real db_service
-    return manager
-
-# --- Refactored Tests --- #
-
-# This test is now redundant with test_create_task_integration
-# We can remove it or keep it as a simpler unit test if desired,
-# but it needs significant rework to not conflict with the integration fixture.
-# For now, let's remove it to focus on the integration tests.
-
-# @pytest.mark.asyncio
-# async def test_create_task_state(
-#     task_manager: SchedulingTaskManager,
-#     # Removed mock_save_task_strategy: AsyncMock,
-# ):
-#     """Verify create_task successfully creates and persists a task."""
-#     task_id = str(uuid.uuid4())
-#     session_id = str(uuid.uuid4())
-#     user_message = Message(role="user", parts=[Part(type="text", text="test")])
-#     params = TaskSendParams(id=task_id, sessionId=session_id, message=user_message)
-
-#     # --- Act ---
-#     # No patching needed for integration test
-#     created_task = await task_manager.create_task(params=params)
-
-#     # Retrieve the task to verify persistence
-#     retrieved_task = await task_manager.get_task(task_id)
-
-#     # --- Assert ---
-#     # 1. Check the returned task from create_task
-#     assert created_task is not None
-#     assert created_task.id == task_id
-#     assert created_task.sessionId == session_id
-#     assert created_task.status.state == TaskState.WORKING
-#     assert created_task.params == params
-#     assert created_task.artifacts == []
-#     assert created_task.history == []
-#     assert created_task.createdAt is not None
-#     assert created_task.updatedAt is not None
-
-#     # 2. Check the retrieved task from get_task
-#     assert retrieved_task is not None
-#     assert retrieved_task.id == task_id
-#     assert retrieved_task.status.state == TaskState.WORKING
-#     # Compare model dumps excluding timestamps which might differ slightly
-#     assert created_task.model_dump(exclude={'createdAt', 'updatedAt'}) == \
-#            retrieved_task.model_dump(exclude={'createdAt', 'updatedAt'})
+    return SchedulingTaskManager(db_service=db_service)
 
 @pytest.mark.asyncio
 async def test_get_task_state_found(
     task_manager: SchedulingTaskManager,
-    # Removed mock_get_task_strategy: AsyncMock,
 ):
     """Verify get_task successfully retrieves a created task."""
     task_id = str(uuid.uuid4())
@@ -327,7 +270,7 @@ async def test_add_task_artifact_not_found(
 
     # --- Act & Assert ---
     # No patching needed, call the real method and expect TaskNotFoundError
-    with pytest.raises(TaskNotFoundError):
+    with pytest.raises(A2ATaskNotFoundError):
         await task_manager.add_task_artifact(task_id, artifact)
 
 # This test is now redundant with test_add_task_artifact_integration_not_found
@@ -543,7 +486,7 @@ async def test_cancel_task_not_cancelable(task_manager: SchedulingTaskManager, n
     with patch.object(task_manager, 'get_task', return_value=initial_task) as mock_get, \
          patch.object(task_manager, 'update_task_status') as mock_update:
 
-        with pytest.raises(TaskNotCancelableError):
+        with pytest.raises(A2ATaskNotCancelableError):
             await task_manager.cancel_task(task_id)
 
     # --- Assert ---
@@ -559,7 +502,7 @@ async def test_cancel_task_not_found(task_manager: SchedulingTaskManager):
     with patch.object(task_manager, 'get_task', return_value=None) as mock_get, \
          patch.object(task_manager, 'update_task_status') as mock_update:
 
-        with pytest.raises(TaskNotFoundError):
+        with pytest.raises(A2ATaskNotFoundError):
             await task_manager.cancel_task(task_id)
 
     # --- Assert ---
@@ -674,7 +617,7 @@ async def test_update_task_status_integration_not_found(task_manager: Scheduling
     new_status = TaskStatus(state=TaskState.COMPLETED)
 
     # --- Act & Assert ---
-    with pytest.raises(TaskNotFoundError):
+    with pytest.raises(A2ATaskNotFoundError):
         await task_manager.update_task_status(task_id, new_status)
 
 @pytest.mark.asyncio
@@ -714,7 +657,7 @@ async def test_add_task_artifact_integration_not_found(task_manager: SchedulingT
     artifact = Artifact(name="result", parts=[Part(type="text", text="some data")])
 
     # --- Act & Assert ---
-    with pytest.raises(TaskNotFoundError):
+    with pytest.raises(A2ATaskNotFoundError):
         await task_manager.add_task_artifact(task_id, artifact)
 
 # --- Tests for Higher-Level Methods --- #
@@ -876,7 +819,7 @@ async def test_cancel_task_not_cancelable(task_manager: SchedulingTaskManager, n
     await task_manager.update_task_status(task_id, TaskStatus(state=non_cancelable_state, message=Message(role="agent", parts=[Part(type="text", text="State set")])))
 
     # --- Act & Assert ---
-    with pytest.raises(TaskNotCancelableError):
+    with pytest.raises(A2ATaskNotCancelableError):
         await task_manager.cancel_task(task_id)
 
 @pytest.mark.asyncio
@@ -885,5 +828,5 @@ async def test_cancel_task_not_found(task_manager: SchedulingTaskManager):
     task_id = str(uuid.uuid4())
 
     # --- Act & Assert ---
-    with pytest.raises(TaskNotFoundError):
+    with pytest.raises(A2ATaskNotFoundError):
         await task_manager.cancel_task(task_id)

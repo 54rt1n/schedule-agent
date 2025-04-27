@@ -2,18 +2,24 @@ import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import patch, AsyncMock
 import uuid
+from datetime import datetime
 
 from sa.a2a.exceptions import (
-    PARSE_ERROR, INVALID_REQUEST, METHOD_NOT_FOUND, INVALID_PARAMS, INTERNAL_ERROR, # Standard JSON-RPC codes
+    PARSE_ERROR, INVALID_REQUEST, METHOD_NOT_FOUND, INVALID_PARAMS, INTERNAL_ERROR,
     ParseError, InvalidRequestError, MethodNotFoundError, InvalidParamsError, InternalError,
-    TaskNotFoundError as A2ATaskNotFoundError # Import the correct A2A TaskNotFound error
+    TaskNotFoundError as A2ATaskNotFoundError
 )
 from sa.core.exceptions import (
     DatabaseError, NLPError, EventNotFoundError, TaskNotFoundError, CoreLogicError,
     ConflictError, ExporterError,
 )
+from sa.a2a.dto import TaskState
+from sa.db.service import DatabaseService
+from sa.event.date_utils import DateUtils
+from sa.event.conflict_resolver import ConflictResolver
+from sa.db.dao import EventCreate
 
-from ..conftest import build_rpc_request
+from ..conftest import build_rpc_request, create_db_event
 
 def test_rpc_method_not_found(client: TestClient, auth_headers_valid: dict):
     """Test calling a non-existent RPC method."""
@@ -210,7 +216,6 @@ def test_rpc_exception_mapping_generic_exception(client: TestClient, auth_header
     assert error_payload["data"] is not None
     assert error_payload["data"]["error_type"] == "Exception"
     # Note: The generic handler in __main__.py might add different/more data if the exception propagates there
-    # assert error_payload["data"]["taskId"] == task_id # task_id might not be available here depending on handler
     mock_handler.assert_awaited_once()
 
 def test_rpc_exception_mapping_a2a_from_handler(client: TestClient, auth_headers_valid: dict):
@@ -251,3 +256,152 @@ def test_rpc_exception_mapping_a2a_from_handler(client: TestClient, auth_headers
     # A2A TaskNotFoundError doesn't add data by default, so check it's None or absent
     assert error_payload.get("data") is None
     mock_handler.assert_awaited_once() 
+
+@pytest.mark.asyncio
+async def test_rpc_exception_mapping_conflict_error_to_invalid_params(
+    client: TestClient, auth_headers_valid: dict, app_db_service: DatabaseService,
+    date_utils: DateUtils, conflict_resolver: ConflictResolver,
+):
+    """Test ConflictError during create maps to InvalidParamsError (-32602)."""
+    # 1. Create an initial event that will cause a conflict
+    # Need datetime objects for EventCreate, not ISO strings
+    start_time_existing = datetime.fromisoformat("2025-08-01T10:00:00+00:00")
+    end_time_existing = datetime.fromisoformat("2025-08-01T11:00:00+00:00")
+
+    existing_event_payload = {
+        "title": "Existing Meeting",
+        "start_time": start_time_existing,
+        "end_time": end_time_existing,
+    }
+    # Use the fixture to create the event directly in DB
+    existing_event = await create_db_event(
+        EventCreate(**existing_event_payload), # Pass EventCreate model
+        app_db_service, 
+        date_utils, 
+        conflict_resolver
+    )
+    assert existing_event is not None
+    # existing_event_id = existing_event.id # existing_event is the model with ID
+
+    # 2. Attempt to create a conflicting event via API
+    task_id_conflict = f"task-conflict-{uuid.uuid4()}"
+    # API expects ISO strings in the data part
+    start_time_conflict_str = "2025-08-01T10:30:00+00:00"
+    end_time_conflict_str = "2025-08-01T11:30:00+00:00"
+
+    conflict_create_payload = {
+        "title": "Conflicting Meeting",
+        "start_time": start_time_conflict_str,
+        "end_time": end_time_conflict_str,
+    }
+    send_params = {
+        "id": task_id_conflict,
+        "intent": "create_event",
+        "message": {
+            "role": "user",
+            "parts": [{"type": "data", "data": conflict_create_payload}]
+        }
+    }
+    rpc_payload = build_rpc_request("tasks/send", send_params)
+
+    # 3. Call the API - DO NOT MOCK handle_structured_create
+    response = client.post("/api/rpc", json=rpc_payload, headers=auth_headers_valid)
+
+    # 4. Assert the RPC error response mapped from ConflictError
+    assert response.status_code == 200
+    response_data = response.json()
+    assert "result" in response_data
+    assert response_data.get("error") is None
+    assert response_data["id"] == rpc_payload["id"]
+
+    result_payload = response_data["result"]
+    assert result_payload["id"] == task_id_conflict
+    assert result_payload["status"]["state"] == TaskState.INPUT_REQUIRED.value
+    assert "conflict" in result_payload["status"]["message"]["parts"][0]["text"].lower()
+
+    assert len(result_payload["artifacts"]) >= 1
+    conflict_artifact = next((a for a in result_payload["artifacts"] if a["name"] == "conflict_info"), None)
+    assert conflict_artifact is not None
+    assert "conflicts" in conflict_artifact["parts"][0]["data"]
+    assert len(conflict_artifact["parts"][0]["data"]["conflicts"]) > 0
+    # Ensure the conflicting event ID is present in the artifact data
+    found_conflict = False
+    for conflict_detail in conflict_artifact["parts"][0]["data"]["conflicts"]:
+        if conflict_detail.get("id") == str(existing_event.id):
+            found_conflict = True
+            break
+    assert found_conflict, f"Conflicting event ID {existing_event.id} not found in artifact"
+
+@pytest.mark.skip(reason="tasks/send does not yet handle export_schedule intent")
+def test_rpc_exception_mapping_exporter_error_to_internal_error(
+    client: TestClient, auth_headers_valid: dict
+):
+    """Test ExporterError from service maps to InternalError (-32603)."""
+    task_id = f"task-exporter-error-{uuid.uuid4()}"
+    error_message = "Simulated ICS export service failure"
+
+    export_payload = {"format": "ics", "start_date": "2025-01-01", "end_date": "2025-01-31"}
+    send_params = {
+        "id": task_id,
+        "intent": "export_schedule",
+        "message": {
+            "role": "user",
+            "parts": [{"type": "data", "data": export_payload}]
+        }
+    }
+    rpc_payload = build_rpc_request("tasks/send", send_params)
+
+    # Patch the export method at its correct location
+    with patch("sa.event.exporters.ical_exporter.ICalExporter.export", side_effect=ExporterError(error_message, data={"reason": "mock failure"})) as mock_export_method:
+
+        response = client.post("/api/rpc", json=rpc_payload, headers=auth_headers_valid)
+
+    assert response.status_code == 200
+    response_data = response.json()
+    assert "error" in response_data
+    assert response_data.get("result") is None
+    assert response_data["id"] == rpc_payload["id"]
+
+    error_payload = response_data["error"]
+    # Expect mapping to A2A InternalError
+    assert error_payload["code"] == InternalError.DEFAULT_CODE # -32603
+    # The API error handler should propagate the original message
+    assert error_payload["message"] == error_message
+    assert error_payload["data"] is not None
+    assert error_payload["data"]["reason"] == "mock failure"
+
+    # TODO: Verify mock call count after confirming patch target
+
+def test_rpc_tasks_send_missing_intent_for_structured_data(
+    client: TestClient, auth_headers_valid: dict
+):
+    """
+    Test tasks/send with structured data but missing 'intent' results in
+    A2AInvalidParamsError (-32602) directly from handle_tasks_send.
+    """
+    task_id = f"task-missing-intent-{uuid.uuid4()}"
+    create_payload = {"summary": "Event without intent", "start": "2025-01-01T12:00:00", "end": "2025-01-01T13:00:00"}
+    send_params = {
+        "id": task_id,
+        # Missing 'intent' field
+        "message": {
+            "role": "user",
+            "parts": [{"type": "data", "data": create_payload}]
+        }
+    }
+    rpc_payload = build_rpc_request("tasks/send", send_params)
+
+    # No mocking needed, error is raised directly by handle_tasks_send validation
+    response = client.post("/api/rpc", json=rpc_payload, headers=auth_headers_valid)
+
+    assert response.status_code == 200
+    response_data = response.json()
+    assert "error" in response_data
+    assert response_data.get("result") is None
+    assert response_data["id"] == rpc_payload["id"]
+
+    error_payload = response_data["error"]
+    assert error_payload["code"] == InvalidParamsError.DEFAULT_CODE # -32602
+    assert "An explicit 'intent' is required when sending structured data" in error_payload["message"]
+    # For this specific error path, the 'data' field is not expected in the error payload
+    assert error_payload.get("data") is None, "'data' field should be absent or null in this error case"

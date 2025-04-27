@@ -76,10 +76,6 @@ async def handle_nlp_request(
             exporters=exporters,
             date_utils=date_utils,
         )
-    # Example: elif nlp_result.intent == "query_events":
-    #     logger.debug(f"Routing task {task_id} to handle_structured_query_from_nlp")
-    #     # Assuming a similar handler exists or will be created
-    #     # return await handle_structured_query_from_nlp(...)
     # Add other intents like create_event, delete_event, update_event etc.
 
     else:

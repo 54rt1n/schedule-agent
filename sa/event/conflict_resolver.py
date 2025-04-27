@@ -17,7 +17,6 @@ class ConflictResolver:
 
     # Remove db_service dependency from __init__
     def __init__(self, date_utils: DateUtils):
-        # self.db_service = db_service # Removed
         self.date_utils = date_utils
         logger.info("ConflictResolver initialized.")
 
@@ -50,7 +49,6 @@ class ConflictResolver:
         processed_event_ids = set()  # Keep track of IDs we've added conflicts for
 
         # Remove the call to db_service.get_events_in_range
-        # potential_instance_conflicts = await self.db_service.get_events_in_range(...)
 
         # Iterate through the provided potential conflicts
         for existing_event in potential_conflicts:
@@ -85,10 +83,6 @@ class ConflictResolver:
         # definitions of recurring events, not just the instances within the range.
         # The caller (strategy) might need to fetch base recurring events separately
         # if pattern checking is required here. For now, only instance overlap is checked.
-
-        # if proposed_event.rrule:
-        #    # ... pattern conflict logic removed for simplification ...
-        #    pass
 
         logger.debug(f"Conflict detection complete. Found {len(conflicts)} conflicts.")
         return conflicts
@@ -158,7 +152,7 @@ class ConflictResolver:
                 if occ1_start < int2_end and occ1_end > int2_start:
                     conflict_count += 1
                     # Optional: remove interval from set to avoid recounting
-                    # intervals2.remove((int2_start, int2_end))
+
                     break # Move to next occ1
             if conflict_count >= pattern_threshold:
                 logger.info("Pattern conflict detected", count=conflict_count, threshold=pattern_threshold)
@@ -249,7 +243,7 @@ class ConflictResolver:
                 if occ1_start < int2_end and occ1_end > int2_start:
                     conflict_count += 1
                     # Optional: remove interval from set to avoid recounting
-                    # intervals2.remove((int2_start, int2_end))
+
                     break # Move to next occ1
             if conflict_count >= pattern_threshold:
                 logger.info("Pattern conflict detected", count=conflict_count, threshold=pattern_threshold)

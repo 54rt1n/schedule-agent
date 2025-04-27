@@ -5,7 +5,7 @@ from unittest.mock import patch, AsyncMock
 
 from sa.a2a.dto import Task, TaskStatus, TaskState, Message, Part
 from sa.a2a.exceptions import TaskNotFoundError, TaskNotCancelableError
-from sa.a2a.task_manager import SchedulingTaskManager # Needed for type hinting patch target
+from sa.a2a.task_manager import SchedulingTaskManager
 from ..conftest import build_rpc_request
 
 

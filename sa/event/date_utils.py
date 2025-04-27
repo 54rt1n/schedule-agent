@@ -516,10 +516,6 @@ class DateUtils:
                 # Note: dateutil rrule includes dtstart itself if it matches the rule.
                 if occ >= dtstart and occ < effective_until:
                      occurrences.append(occ)
-                # Add a safety break for very long/infinite recurrences if needed
-                # if len(occurrences) > 1000: # Example limit
-                #    logger.warning("Recurrence expansion limit reached in simple check")
-                #    break
         except Exception as e:
             logger.exception(f"Error during simple recurrence expansion for {rrule_str}", error=str(e))
             return [] # Return empty list on error
