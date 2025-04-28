@@ -10,6 +10,7 @@ from sa.event.conflict_resolver import ConflictResolver
 from sa.event.date_utils import DateUtils
 from sa.a2a.dto import TaskSendParams, TaskState
 from sa.db.strategies.get_event_by_id import GetEventByIdStrategy
+from sa.db.dao import EventGetById
 
 @pytest.mark.asyncio
 async def test_handle_structured_create_success(
@@ -43,7 +44,7 @@ async def test_handle_structured_create_success(
     # Call the handler
     final_task = await handle_structured_create(
         task_id=task_id,
-        input_data=input_data,
+        payload=input_data,
         task_manager=task_manager,
         db_service=db_service,
         conflict_resolver=conflict_resolver,
@@ -68,11 +69,11 @@ async def test_handle_structured_create_success(
     assert created_event_data["location"] == input_data["location"]
 
     # Verify in DB (optional but good for integration tests)
-    created_event_id = uuid.UUID(created_event_data["id"])
+    created_event_id = EventGetById(id=uuid.UUID(created_event_data["id"]))
     db_event = await get_event_by_id_strategy.execute(data=created_event_id)
     assert db_event is not None
     assert db_event.title == input_data["title"]
-    assert db_event.id == created_event_id
+    assert db_event.id == created_event_id.id
 
 # TODO: Add tests for conflict errors
 # TODO: Add tests for validation errors

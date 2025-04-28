@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sa.core.logging_config import get_logger
 from sa.db.models import ExcludedDate, ModifiedInstance
-from sa.db.dao import EventCreate
+from sa.db.dao import EventCreate, TimeRange
 from sa.db.service import DatabaseService
 from sa.event.date_utils import DateUtils
 from sa.db.strategies.create_event import CreateEventStrategy
@@ -87,7 +87,7 @@ async def test_get_events_in_range_recurring_count(
     assert created_event is not None
 
     # --- Act ---
-    strategy_input = (query_start_utc, query_end_utc)
+    strategy_input = TimeRange(start_time=query_start_utc, end_time=query_end_utc)
     retrieved_events = await get_events_in_range_strategy.execute(data=strategy_input)
 
     # --- Assert ---
@@ -177,7 +177,7 @@ async def test_get_events_in_range_recurring_until(
     assert created_event is not None
 
     # --- Act ---
-    strategy_input = (query_start_utc, query_end_utc)
+    strategy_input = TimeRange(start_time=query_start_utc, end_time=query_end_utc)
     retrieved_events = await get_events_in_range_strategy.execute(data=strategy_input)
 
     # --- Assert ---
@@ -230,7 +230,7 @@ async def test_get_events_in_range_recurring_exdate_inside(
     query_end = datetime(2024, 12, 15, 0, 0, 0, tzinfo=UTC)
 
     # --- Act ---
-    strategy_input = (query_start, query_end)
+    strategy_input = TimeRange(start_time=query_start, end_time=query_end)
     retrieved_events = await get_events_in_range_strategy.execute(data=strategy_input)
 
     # --- Assert ---
@@ -283,7 +283,7 @@ async def test_get_events_in_range_recurring_exdate_at_start(db_service: Databas
     query_end = datetime(2024, 12, 13, 0, 0, 0, tzinfo=UTC)
 
     # --- Act ---
-    strategy_input = (query_start, query_end)
+    strategy_input = TimeRange(start_time=query_start, end_time=query_end)
     retrieved_events = await get_events_in_range_strategy.execute(data=strategy_input)
 
     # --- Assert ---
@@ -344,7 +344,7 @@ async def test_get_events_in_range_recurring_mod_into_range(
     query_end = datetime(2025, 3, 16, 0, 0, 0, tzinfo=UTC)
 
     # --- Act ---
-    strategy_input = (query_start, query_end)
+    strategy_input = TimeRange(start_time=query_start, end_time=query_end)
     retrieved_events = await get_events_in_range_strategy.execute(data=strategy_input)
 
     # --- Assert ---
@@ -400,7 +400,7 @@ async def test_get_events_in_range_recurring_mod_out_of_range(db_service: Databa
     query_end = datetime(2025, 3, 15, 0, 0, 0, tzinfo=UTC)
 
     # --- Act ---
-    strategy_input = (query_start, query_end)
+    strategy_input = TimeRange(start_time=query_start, end_time=query_end)
     retrieved_events = await get_events_in_range_strategy.execute(data=strategy_input)
 
     # --- Assert ---
@@ -457,7 +457,7 @@ async def test_get_events_in_range_recurring_mod_time_inside(db_service: Databas
     query_end = datetime(2025, 3, 13, 0, 0, 0, tzinfo=UTC)
 
     # --- Act ---
-    strategy_input = (query_start, query_end)
+    strategy_input = TimeRange(start_time=query_start, end_time=query_end)
     retrieved_events = await get_events_in_range_strategy.execute(data=strategy_input)
 
     # --- Assert ---

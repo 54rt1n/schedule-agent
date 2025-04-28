@@ -27,9 +27,10 @@ def sample_event_data() -> dict:
     } 
 
 @pytest.fixture
-def create_event_strategy(db_service: DatabaseService, date_utils: DateUtils, conflict_resolver: ConflictResolver) -> CreateEventStrategy:
+def create_event_strategy(db_service: DatabaseService, date_utils: DateUtils,
+                          conflict_resolver: ConflictResolver,
+                          get_events_in_range_strategy: GetEventsInRangeStrategy) -> CreateEventStrategy:
     """Provides data for creating an Event model."""
-    get_events_in_range_strategy = GetEventsInRangeStrategy(db_service=db_service, date_utils=date_utils)
     create_event_strategy = CreateEventStrategy(
         db_service=db_service,
         date_utils=date_utils,
@@ -57,3 +58,8 @@ def get_a2a_task_by_id_strategy(db_service: DatabaseService) -> GetA2ATaskByIdSt
 def update_a2a_task_status_strategy(db_service: DatabaseService) -> UpdateA2ATaskStatusStrategy:
     """Provides a strategy for updating an A2A task status."""
     return UpdateA2ATaskStatusStrategy(db_service=db_service)
+
+@pytest.fixture
+def get_events_in_range_strategy(db_service: DatabaseService, date_utils: DateUtils) -> GetEventsInRangeStrategy:
+    """Provides an instance of the GetEventsInRangeStrategy."""
+    return GetEventsInRangeStrategy(db_service=db_service, date_utils=date_utils) 

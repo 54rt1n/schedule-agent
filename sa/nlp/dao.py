@@ -2,7 +2,7 @@
 """Data Access Objects (DAOs) for the NLP module."""
 
 from pydantic import BaseModel, Field
-
+from typing import Any
 
 class LLMDateInfo(BaseModel):
     """Pydantic model for validating date/time info from LLM."""
@@ -32,10 +32,4 @@ class LLMSchedulingParseResult(BaseModel):
     """Pydantic model for the overall LLM scheduling query parsing result."""
 
     intent: str = "unknown"
-    # Use default_factory for nested models that should default to an empty instance
-    date_info: LLMDateInfo | None = Field(default_factory=LLMDateInfo)
-    filters: LLMFilters | None = Field(default_factory=LLMFilters)
-    confidence: float = 0.0
-    method: str | None = None  # Added by provider (llm, fallback_...)
-    original_query: str | None = None  # Added by NLPProcessor later
-
+    payload: dict[str, Any] = {}

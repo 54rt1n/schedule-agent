@@ -38,7 +38,8 @@ class GetEventsInRangeStrategy(DatabaseExecutionStrategy[TimeRange, List[EventRe
             These Event objects are transient (not representing persisted base events
             unless non-recurring) and contain the calculated instance times (naive UTC).
         """
-        start, end = data
+        start = data.start_time
+        end = data.end_time
         logger.debug(f"Executing GetEventsInRangeStrategy: Start={start.isoformat()}, End={end.isoformat()}")
 
         # 1. Normalize input range to naive UTC for DB queries

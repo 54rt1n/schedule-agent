@@ -43,12 +43,19 @@ async def test_rpc_tasks_send_structured_delete_success(
     delete_data = {
         "id": str(event_id) # Correct field name for EventDelete DAO
     }
+
+    # Wrap the structured data
+    structured_data_wrapper = {
+        "intent": "delete_event",
+        "payload": delete_data
+    }
+
     send_params = TaskSendParams(
         id=task_id,
         sessionId=session_id,
-        intent="delete_event", # Explicit intent
+        # Intent removed from top level
         message=Message(role="user", parts=[
-            Part(type="data", data=delete_data) # Structured delete data
+            Part(type="data", data=structured_data_wrapper) # Use wrapped data
         ])
     )
     rpc_delete_payload = build_rpc_request("tasks/send", send_params.model_dump())
@@ -72,9 +79,16 @@ async def test_rpc_tasks_send_structured_delete_success(
     query_task_id = str(uuid.uuid4())
     target_date = start_time.strftime("%Y-%m-%d")
     query_data = { "start_date": target_date, "end_date": target_date }
+
+    # Wrap the query data for the verification step
+    query_data_wrapper = {
+        "intent": "query_events",
+        "payload": query_data
+    }
+
     query_params = TaskSendParams(
-        id=query_task_id, sessionId=session_id, intent="query_events",
-        message=Message(role="user", parts=[Part(type="data", data=query_data)])
+        id=query_task_id, sessionId=session_id, # Intent removed from top level
+        message=Message(role="user", parts=[Part(type="data", data=query_data_wrapper)]) # Use wrapped data
     )
     rpc_verify_payload = build_rpc_request("tasks/send", query_params.model_dump())
     response_verify = client.post("/api/rpc", json=rpc_verify_payload, headers=auth_headers_valid)
@@ -111,12 +125,19 @@ def test_rpc_tasks_send_structured_delete_not_found(
     delete_data = {
         "id": non_existent_event_id
     }
+
+    # Wrap the structured data
+    structured_data_wrapper = {
+        "intent": "delete_event",
+        "payload": delete_data
+    }
+
     send_params = TaskSendParams(
         id=task_id,
         sessionId=session_id,
-        intent="delete_event",
+        # Intent removed from top level
         message=Message(role="user", parts=[
-            Part(type="data", data=delete_data)
+            Part(type="data", data=structured_data_wrapper) # Use wrapped data
         ])
     )
     rpc_delete_payload = build_rpc_request("tasks/send", send_params.model_dump())
@@ -151,12 +172,19 @@ def test_rpc_tasks_send_structured_delete_validation_error(
     delete_data = {
         "id": invalid_event_id
     }
+
+    # Wrap the structured data
+    structured_data_wrapper = {
+        "intent": "delete_event",
+        "payload": delete_data
+    }
+
     send_params = TaskSendParams(
         id=task_id,
         sessionId=session_id,
-        intent="delete_event",
+        # Intent removed from top level
         message=Message(role="user", parts=[
-            Part(type="data", data=delete_data)
+            Part(type="data", data=structured_data_wrapper) # Use wrapped data
         ])
     )
     rpc_delete_payload = build_rpc_request("tasks/send", send_params.model_dump())

@@ -60,7 +60,7 @@ async def test_get_events_non_recurring_overlap(
     mock_db_service.mock_session.rollback = AsyncMock()
 
     strategy = GetEventsInRangeStrategy(db_service=mock_db_service, date_utils=date_utils)
-    strategy_input: TimeRange = (query_start_aware, query_end_aware)
+    strategy_input = TimeRange(start_time=query_start_aware, end_time=query_end_aware)
 
     # --- Act ---
     results = await strategy.execute(data=strategy_input)
@@ -128,7 +128,7 @@ async def test_get_events_recurring_basic_expansion(
     ]
 
     strategy = GetEventsInRangeStrategy(db_service=mock_db_service, date_utils=date_utils)
-    strategy_input: TimeRange = (query_start_aware, query_end_aware)
+    strategy_input = TimeRange(start_time=query_start_aware, end_time=query_end_aware)
 
     # --- Act ---
     results = await strategy.execute(data=strategy_input)
@@ -216,7 +216,7 @@ async def test_get_events_recurring_with_modification(
     mock_db_service.mock_session.rollback = AsyncMock()
 
     strategy = GetEventsInRangeStrategy(db_service=mock_db_service, date_utils=date_utils)
-    strategy_input: TimeRange = (query_start_aware, query_end_aware)
+    strategy_input = TimeRange(start_time=query_start_aware, end_time=query_end_aware)
 
     # --- Act ---
     results = await strategy.execute(data=strategy_input)

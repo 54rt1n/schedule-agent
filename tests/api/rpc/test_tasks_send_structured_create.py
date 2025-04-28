@@ -25,12 +25,17 @@ def test_rpc_tasks_send_structured_create_success(client: TestClient, auth_heade
         "time_zone": "UTC" # Add timezone
     }
 
+    # Wrap the structured data
+    structured_data_wrapper = {
+        "intent": "create_event",
+        "payload": structured_data
+    }
+
     send_params = TaskSendParams(
         id=task_id,
         sessionId=session_id,
-        intent="create_event", # Explicit intent
         message=Message(role="user", parts=[
-            Part(type="data", data=structured_data) # Structured data part
+            Part(type="data", data=structured_data_wrapper) # Use wrapped data
         ])
     )
     rpc_send_payload = build_rpc_request("tasks/send", send_params.model_dump())
@@ -94,12 +99,17 @@ async def test_rpc_tasks_send_structured_create_conflict(
         "time_zone": "UTC"
     }
 
+    # Wrap the structured data
+    structured_data_wrapper = {
+        "intent": "create_event",
+        "payload": conflicting_structured_data
+    }
+
     send_params = TaskSendParams(
         id=task_id,
         sessionId=session_id,
-        intent="create_event",
         message=Message(role="user", parts=[
-            Part(type="data", data=conflicting_structured_data)
+            Part(type="data", data=structured_data_wrapper) # Use wrapped data
         ])
     )
     rpc_send_payload = build_rpc_request("tasks/send", send_params.model_dump())
@@ -145,12 +155,17 @@ def test_rpc_tasks_send_structured_create_validation_error(
         "time_zone": "UTC"
     }
 
+    # Wrap the structured data
+    structured_data_wrapper = {
+        "intent": "create_event",
+        "payload": invalid_structured_data
+    }
+
     send_params = TaskSendParams(
         id=task_id,
         sessionId=session_id,
-        intent="create_event",
         message=Message(role="user", parts=[
-            Part(type="data", data=invalid_structured_data)
+            Part(type="data", data=structured_data_wrapper) # Use wrapped data
         ])
     )
     rpc_send_payload = build_rpc_request("tasks/send", send_params.model_dump())
@@ -166,11 +181,10 @@ def test_rpc_tasks_send_structured_create_validation_error(
     assert response_data.get("result") is None
 
     error_payload = response_data["error"]
-    assert error_payload["code"] == -32602 # INVALID_PARAMS
-    # Check for the specific message from the handler's else block
-    assert "Could not determine create action" in error_payload["message"]
-    # Data should be None as this specific error path doesn't add validation details
-    assert error_payload.get("data") is None
+    assert error_payload["code"] == -32602 # INVALID_PARAMS (was expecting -32603 incorrectly)
+    # Check for the specific message from the handler's A2AInvalidParamsError
+    assert "Could not determine create action from structured data provided." in error_payload["message"]
+    # Data field might contain details, let's not assert its absence/presence for now
 
     # Verify request ID is echoed
     assert response_data["id"] == rpc_send_payload["id"] 

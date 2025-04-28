@@ -48,12 +48,18 @@ async def test_rpc_tasks_send_structured_export_success(
         "start_date": target_date,
         "end_date": target_date
     }
+
+    # Wrap the structured data
+    structured_data_wrapper = {
+        "intent": "export_calendar",
+        "payload": export_data
+    }
+
     send_params = TaskSendParams(
         id=task_id,
         sessionId=session_id,
-        intent="export_calendar",
         message=Message(role="user", parts=[
-            Part(type="data", data=export_data)
+            Part(type="data", data=structured_data_wrapper)
         ])
     )
     rpc_export_payload = build_rpc_request("tasks/send", send_params.model_dump())

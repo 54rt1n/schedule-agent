@@ -4,7 +4,7 @@ import pytest
 # from sqlalchemy.ext.asyncio import AsyncSession # No longer needed directly
 
 from sa.core.logging_config import get_logger
-from sa.db.dao import EventCreate, TimeRange # Added TimeRange
+from sa.db.dao import EventCreate, TimeRange
 from sa.db.service import DatabaseService
 from sa.db.strategies.create_event import CreateEventStrategy
 from sa.db.strategies.get_events_in_range import GetEventsInRangeStrategy
@@ -50,7 +50,7 @@ async def _run_by_rule_test(
     # Act
     # Use the same instance for getting events
     strategy = get_events_strategy
-    strategy_input = (query_start_utc, query_end_utc)
+    strategy_input = TimeRange(start_time=query_start_utc, end_time=query_end_utc)
     retrieved_events = await strategy.execute(data=strategy_input)
 
     # Assert

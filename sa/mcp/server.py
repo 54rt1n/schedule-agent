@@ -25,6 +25,8 @@ async def setup_mcp_server(settings: Settings) -> FastMCP:
         date_utils = DateUtils()
         conflict_resolver = ConflictResolver(date_utils=date_utils)
 
+        await db_service.initialize()
+
         @asynccontextmanager
         async def mcp_lifespan(app: FastMCP):
             """
@@ -61,7 +63,13 @@ async def setup_mcp_server(settings: Settings) -> FastMCP:
         mcp = FastMCP("SchedulingAgentMCP", lifespan=mcp_lifespan)
         logger.info("FastMCP server instance created.")
 
-        register_handlers(mcp=mcp, settings=settings, db_service=db_service, conflict_resolver=conflict_resolver)
+        register_handlers(
+            mcp=mcp,
+            settings=settings,
+            db_service=db_service,
+            date_utils=date_utils,
+            conflict_resolver=conflict_resolver
+        )
 
         logger.info("MCP Server setup complete.")
         return mcp

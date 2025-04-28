@@ -20,6 +20,7 @@ from sa.a2a.dto import (
     JSONRPCResponse,
     Message,
     Part,
+    StructuredPayloadWrapper,
     Task,
     TaskGetParams,
     TaskSendParams,
@@ -62,42 +63,46 @@ async def test_handle_tasks_send_create_success(
     """Unit test handle_tasks_send: Create event success path using structured data. Patches handler."""
     task_id = str(uuid.uuid4())
     event_title = "Board Meeting"
-    created_event_id = str(uuid.uuid4())
-
-    # Mock event object that the *handler* would return
-    mock_created_event = Event(
-        id=uuid.UUID(created_event_id),
-        title=event_title,
-        start_time=datetime(2024, 6, 15, 14, 0, 0),
-        end_time=datetime(2024, 6, 15, 15, 30, 0),
-    )
-
-    # Prepare input params (This is correct)
-    event_data = {
+    # Prepare the actual payload for the create operation
+    event_payload = {
         "title": event_title,
         "start_time": "2024-06-15T14:00:00Z",
         "end_time": "2024-06-15T15:30:00Z",
     }
+    # Wrap the payload
+    wrapped_data = StructuredPayloadWrapper(
+        intent="create_event",
+        payload=event_payload
+    ).model_dump() # Convert wrapper to dict for Part.data
+
+    # Prepare TaskSendParams using the wrapped data
     params = TaskSendParams(
         id=task_id,
-        message=Message(role="user", parts=[Part(type="data", data=event_data)]),
-        intent="create_event"
+        message=Message(role="user", parts=[Part(type="data", data=wrapped_data)])
+        # No intent field here anymore
     )
 
-    # Define the expected final task state that the *patched handler* should return
+    # Mock the event that the downstream handler (handle_structured_create) would create
+    mock_created_event = Event(
+        id=uuid.uuid4(),
+        title=event_title,
+        start_time=datetime(2024, 6, 15, 14, 0, 0),
+        end_time=datetime(2024, 6, 15, 15, 30, 0),
+    )
+    # Mock the final task state that the *patched handler* should return
     expected_final_task = Task(
         id=task_id,
         status=TaskStatus(state=TaskState.COMPLETED),
-        artifacts=[ # Handler is responsible for creating the artifact
+        artifacts=[
             Artifact(name="created_event", parts=[Part(type="data", data=mock_created_event.model_dump(mode='json'))])
         ]
     )
 
-    # --- Action: Patch the command handler --- #
+    # Patch the specific command handler that handle_tasks_send will route to
     with patch("sa.api.routes.rpc.handle_structured_create", new_callable=AsyncMock) as mock_create_handler:
-        # Configure the patched handler to return the expected task
         mock_create_handler.return_value = expected_final_task
 
+        # Call the main router
         returned_task = await handle_tasks_send(
             params=params,
             task_manager=mock_task_manager,
@@ -109,21 +114,17 @@ async def test_handle_tasks_send_create_success(
         )
 
     # Assertions
-    # 1. Check the patched handler was called with correct args
+    # 1. Check the correct handler was called with the *unwrapped* payload
     mock_create_handler.assert_awaited_once()
     call_args, call_kwargs = mock_create_handler.await_args
     assert call_kwargs.get('task_id') == task_id
-    assert call_kwargs.get('input_data') == event_data
+    assert call_kwargs.get('payload') == event_payload # Check unwrapped payload
     assert call_kwargs.get('task_manager') is mock_task_manager
     assert call_kwargs.get('db_service') is mock_db_service
     assert 'conflict_resolver' in call_kwargs
     assert 'date_utils' in call_kwargs
 
-    # 2. Check DB/TaskManager calls are NOT made directly by handle_tasks_send
-    mock_task_manager.complete_task.assert_not_called()
-    mock_task_manager.create_task.assert_not_awaited()
-
-    # 3. Check the returned Task object
+    # 2. Check the returned Task object matches handler's return
     assert isinstance(returned_task, Task)
     assert returned_task.status.state == TaskState.COMPLETED
     assert returned_task.model_dump() == expected_final_task.model_dump()
@@ -140,32 +141,36 @@ async def test_handle_tasks_send_create_conflict(
 ):
     """Unit test handle_tasks_send: Create event conflict path. Patches handler."""
     task_id = str(uuid.uuid4())
-
-    # Prepare input params
-    event_data = {
+    # Prepare the actual payload
+    event_payload = {
         "title": "Conflict Event",
         "start_time": "2024-07-01T09:00:00Z",
         "end_time": "2024-07-01T10:00:00Z",
     }
+    # Wrap the payload
+    wrapped_data = StructuredPayloadWrapper(
+        intent="create_event",
+        payload=event_payload
+    ).model_dump()
+
+    # Prepare TaskSendParams
     params = TaskSendParams(
         id=task_id,
-        message=Message(role="user", parts=[Part(type="data", data=event_data)]),
-        intent="create_event"
+        message=Message(role="user", parts=[Part(type="data", data=wrapped_data)])
     )
 
-    # Define the expected final task state that the *patched handler* should return
+    # Define the expected final task state returned by the *patched handler*
     expected_final_input_task = Task(
         id=task_id,
-        status=TaskStatus(state=TaskState.INPUT_REQUIRED), # Handler sets this
-        artifacts=[] # Let handler manage artifacts
+        status=TaskStatus(state=TaskState.INPUT_REQUIRED),
+        artifacts=[]
     )
 
-    # --- Action: Patch the command handler --- #
+    # Patch the specific command handler
     with patch("sa.api.routes.rpc.handle_structured_create", new_callable=AsyncMock) as mock_create_handler:
-        # Configure the *patched handler* to return the expected task state
         mock_create_handler.return_value = expected_final_input_task
 
-        # Call the main tasks_send function
+        # Call the main router
         returned_task = await handle_tasks_send(
             params=params,
             task_manager=mock_task_manager,
@@ -177,21 +182,17 @@ async def test_handle_tasks_send_create_conflict(
         )
 
     # Assertions
-    # 1. Check the patched handler was called
+    # 1. Check the correct handler was called with the *unwrapped* payload
     mock_create_handler.assert_awaited_once()
     call_args, call_kwargs = mock_create_handler.await_args
     assert call_kwargs.get('task_id') == task_id
-    assert call_kwargs.get('input_data') == event_data
+    assert call_kwargs.get('payload') == event_payload # Check unwrapped payload
     assert call_kwargs.get('task_manager') is mock_task_manager
     assert call_kwargs.get('db_service') is mock_db_service
     assert 'conflict_resolver' in call_kwargs
     assert 'date_utils' in call_kwargs
 
-    # 2. Check DB / Task Manager were NOT called directly by handle_tasks_send
-    mock_task_manager.require_input_task.assert_not_called()
-    mock_task_manager.complete_task.assert_not_called()
-
-    # 3. Check the returned Task object matches what the patched handler returned
+    # 2. Check the returned Task object matches handler's return
     assert isinstance(returned_task, Task)
     assert returned_task.status.state == TaskState.INPUT_REQUIRED
     assert returned_task.model_dump() == expected_final_input_task.model_dump()
@@ -305,11 +306,12 @@ async def test_handle_tasks_get_not_found(mock_task_manager: SchedulingTaskManag
     # Ensure TaskGetParams is imported if not globally available
     params = TaskGetParams(id=task_id)
 
-    # Mock TaskManager response
-    mock_task_manager.get_task.return_value = None
+    # Mock TaskManager to raise A2ATaskNotFoundError directly
+    mock_task_manager.get_task.side_effect = A2ATaskNotFoundError(f"Task {task_id} not found")
 
     # Action & Assertion
-    with pytest.raises(A2ATaskNotFoundError, match=f"Task with ID '{task_id}' not found."):
+    # The handler should propagate the A2ATaskNotFoundError raised by get_task
+    with pytest.raises(A2ATaskNotFoundError, match=f"Task {task_id} not found"):
         await handle_tasks_get(params=params, task_manager=mock_task_manager)
 
     # Assertions
@@ -383,7 +385,7 @@ async def test_handle_tasks_cancel_not_cancelable(mock_task_manager: SchedulingT
     mock_task_manager.cancel_task.assert_awaited_once_with(task_id=task_id)
 
 
-# --- Unit Tests for export_calendar intent in handle_tasks_send --- #
+# --- Unit Tests for export_calendar intent in handle_tasks_send ---
 
 
 @pytest.mark.asyncio
@@ -710,12 +712,12 @@ async def test_handle_rpc_request_invalid_params(
             mock_get.assert_not_called()
 
 
-# --- Unit Tests for handle_tasks_send (Structured Query/Delete) ---
+# --- Unit Tests for handle_tasks_send (Structured Query/Delete using Wrapper) --- #
 
 @pytest.mark.asyncio
-@patch("sa.a2a.command.structured_query.FindEventsStrategy", new_callable=MagicMock)
-async def test_handle_tasks_send_structured_query(
-    mock_find_strategy_class: MagicMock, # Add the patched class as an arg
+@patch("sa.api.routes.rpc.handle_structured_query", new_callable=AsyncMock) # Patch the handler
+async def test_handle_tasks_send_structured_query_wrapper(
+    mock_query_handler: AsyncMock,
     mock_task_manager: SchedulingTaskManager,
     mock_db_service: DatabaseService,
     mock_nlp_processor: NLPProcessor,
@@ -723,34 +725,32 @@ async def test_handle_tasks_send_structured_query(
     mock_conflict_resolver: ConflictResolver,
     mock_exporters: dict[str, CalendarExporter],
 ):
-    """Test handle_tasks_send routes correctly for structured query. Patches Strategy."""
+    """Test handle_tasks_send routes correctly for structured query using the payload wrapper."""
     task_id = str(uuid.uuid4())
 
-    # Prepare input params with EventQuery data
-    query = EventQuery(title_contains="Project Meeting")
-    query_data = query.model_dump(exclude_unset=True)
+    # Prepare the actual query payload
+    query_payload = {"title_contains": "Project Meeting"}
+    # Wrap it
+    wrapped_data = StructuredPayloadWrapper(
+        intent="query_events",
+        payload=query_payload
+    ).model_dump()
+
+    # Prepare TaskSendParams
     params = TaskSendParams(
         id=task_id,
-        message=Message(role="user", parts=[Part(type="data", data=query_data)]),
-        intent="query_events"
+        message=Message(role="user", parts=[Part(type="data", data=wrapped_data)])
     )
 
-    # Mock the FindEventsStrategy instance and its execute method
-    mock_find_strategy_instance = AsyncMock()
-    mock_found_events = [Event(id=uuid.uuid4(), title="Found Event")] # Dummy event
-    mock_find_strategy_instance.execute.return_value = mock_found_events
-    mock_find_strategy_class.return_value = mock_find_strategy_instance # Mock class to return instance
-
-    # Mock the final task state returned by TaskManager (called by the handler)
+    # Mock the final task state returned by the *patched query handler*
     expected_final_task = Task(id=task_id, status=TaskStatus(state=TaskState.COMPLETED))
-    # The handler will call complete_task, so mock that on the task_manager fixture
-    mock_task_manager.complete_task = AsyncMock(return_value=expected_final_task)
+    mock_query_handler.return_value = expected_final_task
 
-    # --- Action: Call the main send handler --- #
+    # Action: Call the main send handler
     returned_task = await handle_tasks_send(
         params=params,
         task_manager=mock_task_manager,
-        db_service=mock_db_service, # db_service is still needed to instantiate the strategy
+        db_service=mock_db_service,
         nlp_processor=mock_nlp_processor,
         date_utils=date_utils,
         conflict_resolver=mock_conflict_resolver,
@@ -758,33 +758,25 @@ async def test_handle_tasks_send_structured_query(
     )
 
     # Assertions
-    # 1. Check the FindEventsStrategy was instantiated and executed correctly within the handler
-    mock_find_strategy_class.assert_called_once_with(db_service=mock_db_service)
-    mock_find_strategy_instance.execute.assert_awaited_once_with(data=query) # Strategy expects 'data'
+    # 1. Check the query handler was called correctly
+    mock_query_handler.assert_awaited_once()
+    call_args, call_kwargs = mock_query_handler.await_args
+    assert call_kwargs.get('task_id') == task_id
+    # Check the unwrapped payload passed to the specific handler
+    assert call_kwargs.get('payload') == query_payload # Verify unwrapped payload
+    assert call_kwargs.get('task_manager') is mock_task_manager
+    assert call_kwargs.get('db_service') is mock_db_service
+    # ... check other dependencies ...
 
-    # 2. Check TaskManager was called correctly by the handler
-    mock_task_manager.complete_task.assert_awaited_once()
-    # Check the message content passed to complete_task
-    complete_args, _ = mock_task_manager.complete_task.await_args
-    assert complete_args[0] == task_id
-    completion_message: Message = complete_args[1]
-    assert isinstance(completion_message, Message)
-    assert len(completion_message.parts) == 1
-    assert completion_message.parts[0].type == "text"
-    # Check if the JSON representation of the found event is in the message text
-    assert '"title": "Found Event"' in completion_message.parts[0].text
-
-
-    # 3. Check the returned Task object matches the one from complete_task mock
+    # 2. Check the returned task matches the handler's return
     assert returned_task is not None
     assert returned_task.status.state == TaskState.COMPLETED
     assert returned_task.model_dump() == expected_final_task.model_dump()
 
 @pytest.mark.asyncio
-# Patch the DeleteEventStrategy where it's USED (inside the structured_delete handler)
-@patch("sa.a2a.command.structured_delete.DeleteEventStrategy", new_callable=MagicMock)
-async def test_handle_tasks_send_structured_delete(
-    mock_delete_strategy_class: MagicMock, # Add the patched class as an arg
+@patch("sa.api.routes.rpc.handle_structured_delete", new_callable=AsyncMock) # Patch the handler
+async def test_handle_tasks_send_structured_delete_wrapper(
+    mock_delete_handler: AsyncMock,
     mock_task_manager: SchedulingTaskManager,
     mock_db_service: DatabaseService,
     mock_nlp_processor: NLPProcessor,
@@ -792,34 +784,33 @@ async def test_handle_tasks_send_structured_delete(
     mock_conflict_resolver: ConflictResolver,
     mock_exporters: dict[str, CalendarExporter],
 ):
-    """Test handle_tasks_send routes correctly for structured delete. Patches Strategy."""
+    """Test handle_tasks_send routes correctly for structured delete using the payload wrapper."""
     task_id = str(uuid.uuid4())
     event_id_to_delete = uuid.uuid4()
 
-    # Prepare input params with EventDelete data
-    delete_payload = EventDelete(id=event_id_to_delete)
-    delete_data = delete_payload.model_dump()
+    # Prepare the actual delete payload
+    delete_payload = {"id": str(event_id_to_delete)} # DAO expects UUID, but payload might be str
+    # Wrap it
+    wrapped_data = StructuredPayloadWrapper(
+        intent="delete_event",
+        payload=delete_payload
+    ).model_dump()
+
+    # Prepare TaskSendParams
     params = TaskSendParams(
         id=task_id,
-        message=Message(role="user", parts=[Part(type="data", data=delete_data)]),
-        intent="delete_event"
+        message=Message(role="user", parts=[Part(type="data", data=wrapped_data)])
     )
 
-    # Mock the DeleteEventStrategy instance and its execute method
-    mock_delete_strategy_instance = AsyncMock()
-    mock_delete_strategy_instance.execute.return_value = True # Simulate successful deletion
-    mock_delete_strategy_class.return_value = mock_delete_strategy_instance # Mock class to return instance
-
-    # Mock the final task state returned by TaskManager (called by the handler)
+    # Mock the final task state returned by the *patched delete handler*
     expected_final_task = Task(id=task_id, status=TaskStatus(state=TaskState.COMPLETED))
-    # The handler will call complete_task, so mock that on the task_manager fixture
-    mock_task_manager.complete_task = AsyncMock(return_value=expected_final_task)
+    mock_delete_handler.return_value = expected_final_task
 
-    # --- Action: Call the main send handler --- #
+    # Action: Call the main send handler
     returned_task = await handle_tasks_send(
         params=params,
         task_manager=mock_task_manager,
-        db_service=mock_db_service, # db_service is still needed to instantiate the strategy
+        db_service=mock_db_service,
         nlp_processor=mock_nlp_processor,
         date_utils=date_utils,
         conflict_resolver=mock_conflict_resolver,
@@ -827,22 +818,17 @@ async def test_handle_tasks_send_structured_delete(
     )
 
     # Assertions
-    # 1. Check the DeleteEventStrategy was instantiated and executed correctly
-    mock_delete_strategy_class.assert_called_once_with(db_service=mock_db_service)
-    mock_delete_strategy_instance.execute.assert_awaited_once_with(data=event_id_to_delete) # Strategy expects 'data'
+    # 1. Check the delete handler was called correctly
+    mock_delete_handler.assert_awaited_once()
+    call_args, call_kwargs = mock_delete_handler.await_args
+    assert call_kwargs.get('task_id') == task_id
+    # Check the unwrapped payload passed to the specific handler
+    assert call_kwargs.get('payload') == delete_payload # Verify unwrapped payload
+    assert call_kwargs.get('task_manager') is mock_task_manager
+    assert call_kwargs.get('db_service') is mock_db_service
+    # ... check other dependencies ...
 
-    # 2. Task manager was called to complete the task by the handler
-    mock_task_manager.complete_task.assert_awaited_once()
-    # Check args if needed, e.g., the success message
-    complete_args, _ = mock_task_manager.complete_task.await_args
-    assert complete_args[0] == task_id
-    completion_message: Message = complete_args[1]
-    assert isinstance(completion_message, Message)
-    assert len(completion_message.parts) == 1
-    assert completion_message.parts[0].type == "text"
-    assert f"Successfully deleted event {event_id_to_delete}" in completion_message.parts[0].text
-
-    # 3. Check the returned Task object matches the one from complete_task mock
+    # 2. Check the returned task matches the handler's return
     assert returned_task is not None
     assert returned_task.status.state == TaskState.COMPLETED
     assert returned_task.model_dump() == expected_final_task.model_dump()

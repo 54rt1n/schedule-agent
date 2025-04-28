@@ -47,12 +47,19 @@ async def test_rpc_tasks_send_structured_query_success(
         "end_date": target_date
         # Add other query params like title if needed by handler
     }
+
+    # Wrap the structured data
+    structured_data_wrapper = {
+        "intent": "query_events",
+        "payload": query_data
+    }
+
     send_params = TaskSendParams(
         id=task_id,
         sessionId=session_id,
-        intent="query_events", # Explicit intent
+        # Intent removed from top level
         message=Message(role="user", parts=[
-            Part(type="data", data=query_data) # Structured query data
+            Part(type="data", data=structured_data_wrapper) # Use wrapped data
         ])
     )
     rpc_query_payload = build_rpc_request("tasks/send", send_params.model_dump())

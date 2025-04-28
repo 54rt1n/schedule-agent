@@ -4,14 +4,13 @@
 from pydantic import ValidationError
 
 from sa.a2a.task_manager import SchedulingTaskManager
-from sa.a2a.dto import Message, Part, Task
+from sa.a2a.dto import Message, Part, Task, StructuredPayloadWrapper
 from sa.core.logging_config import get_logger
 from sa.db.service import DatabaseService
 from sa.event.date_utils import DateUtils
 from sa.event.exporters.base import CalendarExporter
 from sa.event.conflict_resolver import ConflictResolver
 from sa.nlp.nlp_processor import NLPProcessor
-from .structured_export import handle_structured_export
 
 logger = get_logger(__name__)
 
@@ -25,7 +24,7 @@ async def handle_nlp_request(
     exporters: dict[str, CalendarExporter],
     date_utils: DateUtils,
     conflict_resolver: ConflictResolver,
-) -> Task:
+) -> StructuredPayloadWrapper:
     """Handles raw text input from user, determines intent via NLP, and routes to the appropriate command handler."""
     # 1. Extract text query
     if not message.parts or message.parts[0].type != "text" or not message.parts[0].text:
@@ -56,27 +55,15 @@ async def handle_nlp_request(
     # Add more intent routing as needed
     if nlp_result.intent == "export_calendar":
         logger.debug(f"Routing task {task_id} to handle_structured_export")
-        # Construct the data part expected by handle_structured_export
-        export_data_part = Part(
-            type="data",
-            data={
+        # Construct the StructuredDataPayload and return it to the user as a message.
+        # They will pass it back in a follow-up task, and the handler will take it from there.
+        return StructuredPayloadWrapper(
+            intent="export_calendar",
+            payload={
                 "date_info": nlp_result.date_info.model_dump() if nlp_result.date_info else {},
                 "format": nlp_result.filters.format if nlp_result.filters else None,
-                # Add other relevant filters if handle_structured_export uses them
             }
         )
-        # Create a new message with this data part
-        export_message = Message(role="agent", parts=[export_data_part]) # Role must be user or agent
-
-        return await handle_structured_export(
-            task_id=task_id,
-            message=export_message, # Pass the constructed message
-            task_manager=task_manager,
-            db_service=db_service,
-            exporters=exporters,
-            date_utils=date_utils,
-        )
-    # Add other intents like create_event, delete_event, update_event etc.
 
     else:
         # Fallback for unknown or unhandled intents

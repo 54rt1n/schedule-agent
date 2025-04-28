@@ -8,51 +8,63 @@ from sa.db.models import A2ATask
 from sa.db.service import DatabaseService
 from sa.db.strategies.base import DatabaseExecutionStrategy
 from sa.core.logging_config import get_logger
+from sa.db.dao import A2ATaskCreate
 
 logger = get_logger(__name__)
 
 
-class SaveA2ATaskStrategy(DatabaseExecutionStrategy[A2ATask, Optional[A2ATask]]):
-    """Strategy to save (create or update) an A2A task."""
+class SaveA2ATaskStrategy(DatabaseExecutionStrategy[A2ATaskCreate, Optional[A2ATask]]):
+    """Strategy to save (create or update) an A2A task using merge."""
 
     def __init__(self, db_service: DatabaseService):
         super().__init__(db_service=db_service)
 
-    async def _run(self, session: AsyncSession, data: A2ATask) -> Optional[A2ATask]:
+    async def _run(self, session: AsyncSession, data: A2ATaskCreate) -> Optional[A2ATask]:
         """
-        Adds the task to the session for persistence.
-        The base class handles commit.
+        Constructs an A2ATask model instance from the DAO and merges it into the session.
+        Handles both INSERT (if task ID is new) and UPDATE (if task ID exists).
+        Relies on DB model defaults for created_at/updated_at.
 
         Args:
             session: The database session.
-            data: The A2ATask object to save.
+            data: The DAO containing data for the A2ATask.
 
         Returns:
-            The persisted A2ATask object after flushing/refreshing, or None if data is None.
+            The persisted A2ATask object after merging and flushing, or None if input data is None.
         """
         if data is None:
             logger.warning("SaveA2ATaskStrategy received None data.")
             return None
 
-        task_to_save = data
-        logger.debug(f"Executing SaveA2ATaskStrategy for task ID: {task_to_save.id}")
+        logger.debug(f"Executing SaveA2ATaskStrategy for task ID: {data.id}")
 
-        # Use session.merge() which handles both INSERT and UPDATE based on PK.
-        # It fetches from DB if PK exists, updates the fetched object, and adds it.
-        # If PK doesn't exist, it adds the passed object.
         try:
-            # Merge returns the persisted object attached to the session
-            merged_task = await session.merge(task_to_save)
-            # We need to flush to ensure the object is in the DB before commit
-            # and refresh might be needed if there are server-side defaults/triggers
+            # Create an A2ATask instance directly from the DAO fields.
+            # Let the DB model handle created_at/updated_at via defaults/onupdate.
+            task_instance = A2ATask(
+                id=data.id,
+                session_id=data.session_id,
+                state=data.state,
+                status_message_json=data.status_message_json,
+                status_timestamp=data.status_timestamp,
+                artifacts_json=data.artifacts_json,
+                history_json=data.history_json,
+                metadata_json=data.metadata_json,
+            )
+
+            # Use session.merge() which handles both INSERT and UPDATE based on PK.
+            merged_task = await session.merge(task_instance)
+
+            # Flush to ensure the operation is processed before commit.
+            # Refresh might be needed if relying heavily on server defaults not covered by merge,
+            # but merge should handle loading state if it exists.
             await session.flush()
-            await session.refresh(merged_task)
-            logger.debug(f"A2A task {merged_task.id} merged/saved, flushed, and refreshed.")
+            await session.refresh(merged_task) # Refresh to get any DB-generated values
+
+            logger.debug(f"A2A task {merged_task.id} merged, flushed, and refreshed.")
             return merged_task
         except Exception as e:
-            # Log the specific error during merge/flush/refresh
-            logger.error(f"Error during merge/flush/refresh for task {task_to_save.id}: {e}", exc_info=True)
-            # Re-raise the exception to be caught by the base class's execute method
+            logger.error(f"Error during merge/flush/refresh for task {data.id}: {e}", exc_info=True)
             raise
 
     async def _failure(self, session: AsyncSession, exception: Exception) -> None:

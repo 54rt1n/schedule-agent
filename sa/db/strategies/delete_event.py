@@ -14,13 +14,13 @@ from sa.db.dao import EventDelete
 logger = get_logger(__name__)
 
 
-class DeleteEventStrategy(DatabaseExecutionStrategy[uuid.UUID, bool]):
+class DeleteEventStrategy(DatabaseExecutionStrategy[EventDelete, bool]):
     """Strategy to delete an event by its ID."""
 
     def __init__(self, db_service: DatabaseService):
         super().__init__(db_service=db_service)
 
-    async def _run(self, session: AsyncSession, data: uuid.UUID) -> bool:
+    async def _run(self, session: AsyncSession, data: EventDelete) -> bool:
         """
         Deletes the event by ID within the transaction managed by the base class.
 
@@ -31,7 +31,7 @@ class DeleteEventStrategy(DatabaseExecutionStrategy[uuid.UUID, bool]):
         Returns:
             True if an event was deleted, False otherwise.
         """
-        event_id = data
+        event_id = data.id
         logger.debug(f"Executing DeleteEventStrategy for ID: {event_id}")
 
         stmt = delete(Event).where(Event.id == event_id)

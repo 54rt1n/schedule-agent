@@ -14,21 +14,28 @@ class A2ATask(SQLModel, table=True):
 
     id: str = Field(primary_key=True, index=True)
     session_id: str | None = Field(default=None, index=True)
+    # Current state from Task.status.state
     state: str = Field(index=True)
-    # Store complex objects as JSON strings
-    # Use Text for better compatibility with potentially large JSON strings across DBs
+    # Optional message from Task.status.message, stored as JSON
     status_message_json: str | None = Field(default=None, sa_column=Column(Text))
-    params_json: str | None = Field(default=None, sa_column=Column(Text))
+    # Optional timestamp from Task.status.timestamp
+    status_timestamp: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=False)))
+    # Optional list of artifacts from Task.artifacts, stored as JSON
     artifacts_json: str | None = Field(default=None, sa_column=Column(Text))
+    # Optional list of messages from Task.history, stored as JSON
     history_json: str | None = Field(default=None, sa_column=Column(Text))
+    # Optional metadata from Task.metadata, stored as JSON
+    metadata_json: str | None = Field(default=None, sa_column=Column(Text))
+
+    # Internal timestamps for record tracking
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC).replace(tzinfo=None),
-        sa_column=Column(DateTime, nullable=False),
+        sa_column=Column(DateTime(timezone=False), nullable=False),
     )
     updated_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC).replace(tzinfo=None),
         sa_column=Column(
-            DateTime,
+            DateTime(timezone=False),
             onupdate=lambda: datetime.now(UTC).replace(tzinfo=None),
             nullable=False,
         ),

@@ -35,7 +35,9 @@ async def test_get_events_in_range_simple(
     query_end_aware = datetime(2025, 6, 15, 16, 0, 0, tzinfo=UTC)   # 4 PM UTC
 
     strategy = GetEventsInRangeStrategy(db_service=db_service, date_utils=date_utils)
-    strategy_input: TimeRange = (query_start_aware, query_end_aware)
+    # strategy_input: TimeRange = (query_start_aware, query_end_aware) # Old tuple
+    # Instantiate the TimeRange DAO
+    strategy_input = TimeRange(start_time=query_start_aware, end_time=query_end_aware)
 
     # --- Act ---
     results = await strategy.execute(data=strategy_input)

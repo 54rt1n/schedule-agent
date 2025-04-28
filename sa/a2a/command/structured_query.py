@@ -18,41 +18,30 @@ logger = get_logger(__name__)
 
 async def handle_structured_query(
     task_id: str,
-    message: Message,
+    payload: dict[str, Any],
     task_manager: SchedulingTaskManager,
     db_service: DatabaseService,
 ) -> Task:
-    """Handles structured queries for events based on EventQuery payload."""
+    """Handles structured queries for events based on the unwrapped payload (dict)."""
     logger.info(f"Handling structured query for task {task_id}")
 
     query_params: EventQuery | None = None
     result_message = ""
 
     try:
-        # 1. Extract and validate the payload
-        if not message.parts or message.parts[0].type != "data":
-            raise InvalidParamsError("Missing or invalid data part in message for structured query.")
-
-        payload_data = message.parts[0].data
-        if not isinstance(payload_data, dict):
-            raise InvalidParamsError("Data part payload is not a dictionary.")
-
         try:
-            query_params = EventQuery.model_validate(payload_data)
-            logger.debug(f"Validated query parameters: {query_params}")
+            query_params = EventQuery.model_validate(payload)
+            logger.debug(f"Validated query parameters from payload: {query_params}")
         except ValidationError as e:
             logger.warning(f"Invalid EventQuery payload for task {task_id}: {e}")
-            raise InvalidParamsError(f"Invalid query parameters: {e}", data=e.errors())
+            raise InvalidParamsError(f"Invalid query parameters in payload: {e}", data=e.errors())
 
         # 2. Call the find_events strategy
-        find_strategy = FindEventsStrategy(db_service=db_service) # Pass dependencies
+        find_strategy = FindEventsStrategy(db_service=db_service)
         logger.info(f"Calling FindEventsStrategy for task {task_id}")
-        # Strategy expects EventQuery object as data
         found_events = await find_strategy.execute(data=query_params)
 
         # 3. Format the results
-        # Convert found events (SQLModel objects) to dicts/JSON
-        # Using EventRead schema might be better long-term, but basic dict for now
         results_list = [
             {
                 "id": str(event.id),
@@ -60,7 +49,6 @@ async def handle_structured_query(
                 "start_time": event.start_time.isoformat() if event.start_time else None,
                 "end_time": event.end_time.isoformat() if event.end_time else None,
                 "location": event.location,
-                # Add other relevant fields as needed
             }
             for event in found_events
         ]
@@ -68,16 +56,13 @@ async def handle_structured_query(
         logger.info(f"Found {len(found_events)} events for task {task_id}")
 
         # 4. Complete the task
-        # Result should be a Message object
+        # Still need Message/Part to construct the completion message
         agent_message = Message(role="agent", parts=[Part(type="text", text=result_message)])
         return await task_manager.complete_task(task_id, agent_message)
 
     except InvalidParamsError as ipe:
-        error_text = f"Error processing query: {ipe}"
         logger.error(f"InvalidParamsError processing structured query for task {task_id}: {ipe}")
         raise ipe
     except Exception as e:
-        error_text = f"An unexpected error occurred: {e}"
-        # Catch other potential errors (e.g., database connection)
         logger.exception(f"Unexpected error processing structured query for task {task_id}: {e}")
-        raise InternalError(message=error_text) from e
+        raise InternalError(message=f"An unexpected error occurred during query processing: {e}") from e

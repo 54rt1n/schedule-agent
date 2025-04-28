@@ -13,6 +13,7 @@ from sa.db.dao import (
     EventDelete,
     EventQuery,
     EventUpdate,
+    EventGetById,
 )
 from sa.core.exceptions import ConflictError, DatabaseError, EventNotFoundError
 from sa.core.logging_config import get_logger
@@ -183,13 +184,13 @@ async def schedule_update_event(
     db_service: DatabaseService,
     conflict_resolver: ConflictResolver,
     date_utils: DateUtils,
-    event_id: str,
     update_data: Dict[str, Any],
 ) -> Dict[str, Any]:
     """
     Updates an existing calendar event using structured data.
     (Dependencies are passed explicitly by the tool wrapper).
     """
+    event_id = update_data.get("id", None)
     logger.info(f"Executing schedule_update_event logic for event_id={event_id} with updates={update_data}")
     try:
         # Validate UUID format
@@ -209,11 +210,7 @@ async def schedule_update_event(
         )
 
         # Execute the strategy
-        # Strategy expects tuple[uuid.UUID, EventUpdate] as data
-        # Strategy returns Optional[EventResponse]
-        updated_event_or_instance = await update_event_strategy.execute(
-            data=(event_uuid, event_update_data)
-        )
+        updated_event_or_instance = await update_event_strategy.execute(data=event_update_data)
 
         if updated_event_or_instance:
              logger.info(f"Event '{event_id}' updated successfully.")
@@ -268,7 +265,7 @@ async def schedule_update_event(
 
 async def schedule_delete_event(
     db_service: DatabaseService,
-    event_id: str,
+    event_id: str | uuid.UUID,
 ) -> Dict[str, Any]:
     """
     Deletes an existing calendar event by its ID.
@@ -278,14 +275,17 @@ async def schedule_delete_event(
     try:
         # Validate UUID format
         try:
-            event_uuid = uuid.UUID(event_id)
+            if isinstance(event_id, str):
+                event_uuid = uuid.UUID(event_id)
+            else:
+                event_uuid = event_id
         except ValueError:
             raise ValueError(f"Invalid event_id format: '{event_id}'. Must be a valid UUID.")
 
         # Instantiate and execute the DeleteEventStrategy
         delete_event_strategy = DeleteEventStrategy(db_service=db_service)
         # Strategy expects EventDelete (UUID) as data and returns bool
-        deleted = await delete_event_strategy.execute(data=event_uuid)
+        deleted = await delete_event_strategy.execute(data=EventDelete(id=event_uuid))
 
         if deleted:
             logger.info(f"Event '{event_id}' deleted successfully.")
@@ -310,10 +310,10 @@ async def schedule_delete_event(
         return {"success": False, "error": f"An unexpected error occurred: {str(e)}"}
 
 
-# Updated register_handlers function
 def register_handlers(
     mcp: FastMCP,
     db_service: DatabaseService,
+    date_utils: DateUtils,
     conflict_resolver: ConflictResolver,
     settings: Settings,
 ):
@@ -363,6 +363,7 @@ def register_handlers(
             rrule=rrule,
             participant_identifiers=participant_identifiers,
             db_service=db_service,
+            date_utils=date_utils,
             conflict_resolver=conflict_resolver,
         )
 
@@ -383,22 +384,6 @@ def register_handlers(
         Returns:
             A dictionary containing the result, including success status, count, and list of found events or error information.
         """
-        # Get dependencies
-        try:
-            from .server import _shared_state
-            session_factory = _shared_state["session_factory"]
-            date_utils = DateUtils()
-            db_service = DatabaseService(session_factory=session_factory, date_utils=date_utils)
-            # Inject resolver if needed by db_service methods used in query?
-            # conflict_resolver = ConflictResolver(db_service=db_service, date_utils=date_utils)
-            # db_service.conflict_resolver = conflict_resolver
-        except KeyError:
-            logger.exception("Session factory not found in shared state.")
-            return {"success": False, "error": "Internal server configuration error: Session factory not found."}
-        except Exception as e:
-            logger.exception(f"Error creating services in query_events_tool: {e}")
-            return {"success": False, "error": "Internal server configuration error creating services."}
-
         # Call implementation
         return await schedule_query_events(
             start_time=start_time,
@@ -414,12 +399,10 @@ def register_handlers(
         update_data: Dict[str, Any],
     ) -> Dict[str, Any]:
         """Updates an existing event identified by its unique ID."""
-        # Initialize DateUtils here or ensure it's passed correctly
-        date_utils = DateUtils()
         return await schedule_update_event(
             db_service=db_service,
             conflict_resolver=conflict_resolver,
-            date_utils=date_utils, # Pass date_utils
+            date_utils=date_utils,
             event_id=event_id,
             update_data=update_data,
         )

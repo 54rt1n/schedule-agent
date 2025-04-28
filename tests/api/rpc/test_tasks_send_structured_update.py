@@ -42,19 +42,21 @@ async def test_rpc_tasks_send_structured_update_success(
     new_title = "Updated Event Title"
     # Prepare the nested structure expected by StructuredUpdatePayload
     event_update_details = {
+        "id": str(event_id),
         "title": new_title
     }
     # This is the payload for the message part's data field
-    structured_payload = {
-        "event_id": str(event_id),
-        "update_data": event_update_details
+    # New wrapper structure required by the API
+    structured_data_wrapper = {
+        "intent": "update_event",
+        "payload": event_update_details
     }
     send_params = TaskSendParams(
         id=task_id,
         sessionId=session_id,
-        intent="update_event", # Explicit intent
+        # Intent is now inside the data part
         message=Message(role="user", parts=[
-            Part(type="data", data=structured_payload) # Pass the corrected payload
+            Part(type="data", data=structured_data_wrapper) # Pass the new wrapped payload
         ])
     )
     rpc_update_payload = build_rpc_request("tasks/send", send_params.model_dump())

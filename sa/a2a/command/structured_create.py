@@ -2,6 +2,7 @@
 """Handles the logic path for structured data input (create event ONLY)."""
 
 from pydantic import ValidationError
+from typing import Any
 
 from sa.a2a.dto import Artifact, Message, Part, Task
 from sa.a2a.task_manager import SchedulingTaskManager
@@ -19,7 +20,7 @@ logger = get_logger(__name__)
 
 async def handle_structured_create(
     task_id: str,
-    input_data: dict,
+    payload: dict[str, Any],
     task_manager: SchedulingTaskManager,
     db_service: DatabaseService,
     conflict_resolver: ConflictResolver,
@@ -30,9 +31,9 @@ async def handle_structured_create(
     try:
         # Logic for handling structured data (Create Event Path)
         # Basic check if it looks like a potential create request
-        if "title" in input_data and ("start_time" in input_data or "startTime" in input_data):
+        if "title" in payload and ("start_time" in payload or "startTime" in payload):
             # Validate input data against EventCreate model
-            event_create_data = EventCreate.model_validate(input_data)
+            event_create_data = EventCreate.model_validate(payload)
 
             get_events_in_range_strategy = GetEventsInRangeStrategy(
                 db_service=db_service,
@@ -63,7 +64,7 @@ async def handle_structured_create(
         else:
             # Structured data didn't match create event criteria
             logger.warning(
-                "Could not determine create action from structured data", task_id=task_id, data=input_data
+                "Could not determine create action from structured data", task_id=task_id, data=payload
             )
             raise InvalidParamsError(message="Could not determine create action from structured data provided.")
 

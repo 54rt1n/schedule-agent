@@ -36,19 +36,9 @@ def valid_update_data() -> dict:
     }
 
 @pytest.fixture
-def valid_update_payload(event_id: uuid.UUID, valid_update_data: dict) -> Message:
-    """Provides a valid structured update payload Message.
-
-    The payload dictionary is placed in the 'data' field of a Part with type='data'.
-    """
-    payload_dict = {
-        "event_id": str(event_id),
-        "update_data": valid_update_data
-    }
-    return Message(
-        role="user",
-        parts=[Part(type="data", data=payload_dict)] # Use type="data" and place dict in data field
-    )
+def valid_update_payload_dict(event_id: uuid.UUID, valid_update_data: dict) -> dict:
+    """Provides a valid raw dictionary payload for update."""
+    return {"id": event_id, **valid_update_data}
 
 @pytest.fixture
 def updated_db_event(event_id: uuid.UUID) -> Event:
@@ -75,11 +65,11 @@ async def test_handle_structured_update_success(
     conflict_resolver: ConflictResolver,
     date_utils: DateUtils,
     event_id: uuid.UUID,
-    valid_update_payload: Message,
+    valid_update_payload_dict: dict,
     valid_update_data: dict,
     updated_db_event: Event,
 ):
-    """Tests successful event update via structured input."""
+    """Tests successful event update via structured input with unwrapped payload."""
     task_id = "test_update_task_123"
 
     # Configure mock strategy
@@ -92,10 +82,10 @@ async def test_handle_structured_update_success(
     mock_artifact = Artifact(name="mock_artifact", parts=[Part(type="text", text="Mock Data")])
     mock_task_manager.complete_task.return_value = Task(id=task_id, status=mock_status, artifacts=[mock_artifact], history=[])
 
-    # Call the handler
+    # Call the handler, passing the payload dict directly
     result_task = await handle_structured_update(
         task_id=task_id,
-        message=valid_update_payload,
+        payload=valid_update_payload_dict,
         task_manager=mock_task_manager,
         db_service=mock_db_service,
         conflict_resolver=conflict_resolver,
@@ -104,14 +94,13 @@ async def test_handle_structured_update_success(
 
     # Assertions for strategy
     mock_update_strategy_class.assert_called_once_with(db_service=mock_db_service, conflict_resolver=conflict_resolver, date_utils=date_utils)
-    mock_update_strategy_instance.execute.assert_awaited_once_with(
-        data=(event_id, ANY)
-    )
-    # Check the type and content of update_data passed to strategy
+    mock_update_strategy_instance.execute.assert_awaited_once()
     call_args, call_kwargs = mock_update_strategy_instance.execute.await_args
-    assert isinstance(call_kwargs['data'][1], EventUpdate)
-    assert call_kwargs['data'][1].title == valid_update_data['title']
-    assert call_kwargs['data'][1].location == valid_update_data['location']
+    passed_data = call_kwargs['data']
+    assert isinstance(passed_data, EventUpdate)
+    assert passed_data.id == event_id
+    assert passed_data.title == valid_update_data['title']
+    assert passed_data.location == valid_update_data['location']
 
     # Assertions for task manager
     mock_task_manager.complete_task.assert_awaited_once()
@@ -138,24 +127,24 @@ async def test_handle_structured_update_event_not_found(
     conflict_resolver: ConflictResolver,
     date_utils: DateUtils,
     event_id: uuid.UUID,
-    valid_update_payload: Message,
+    valid_update_payload_dict: dict,
 ):
-    """Tests the handler when the event to update is not found."""
+    """Tests the handler when the event to update is not found with unwrapped payload."""
     task_id = "test_update_not_found"
 
     # Configure mock strategy
     mock_update_strategy_instance = AsyncMock()
-    mock_update_strategy_instance.execute.return_value = None # Simulate event not found by strategy
+    mock_update_strategy_instance.execute.return_value = None
     mock_update_strategy_class.return_value = mock_update_strategy_instance
 
     # Configure mock TaskManager
     mock_status = TaskStatus(state=TaskState.FAILED, message=Message(role="agent", parts=[Part(type="text", text="Mock Fail")]))
     mock_task_manager.fail_task.return_value = Task(id=task_id, status=mock_status, artifacts=[], history=[])
 
-    # Call the handler
+    # Call the handler, passing the payload dict directly
     result_task = await handle_structured_update(
         task_id=task_id,
-        message=valid_update_payload,
+        payload=valid_update_payload_dict,
         task_manager=mock_task_manager,
         db_service=mock_db_service,
         conflict_resolver=conflict_resolver,
@@ -164,7 +153,11 @@ async def test_handle_structured_update_event_not_found(
 
     # Assertions for strategy
     mock_update_strategy_class.assert_called_once_with(db_service=mock_db_service, conflict_resolver=conflict_resolver, date_utils=date_utils)
-    mock_update_strategy_instance.execute.assert_awaited_once_with(data=(event_id, ANY))
+    mock_update_strategy_instance.execute.assert_awaited_once()
+    call_args, call_kwargs = mock_update_strategy_instance.execute.await_args
+    passed_data = call_kwargs['data']
+    assert isinstance(passed_data, EventUpdate)
+    assert passed_data.id == event_id
 
     # Assertions for task manager
     mock_task_manager.fail_task.assert_awaited_once()
@@ -188,15 +181,15 @@ async def test_handle_structured_update_conflict(
     conflict_resolver: ConflictResolver,
     date_utils: DateUtils,
     event_id: uuid.UUID,
-    valid_update_payload: Message,
+    valid_update_payload_dict: dict,
 ):
-    """Tests the handler when a conflict occurs during update."""
+    """Tests the handler when a conflict occurs during update with unwrapped payload."""
     task_id = "test_update_conflict"
     conflict_details = [{"type": "instance", "event": {"id": str(uuid.uuid4()), "title": "Conflict Event"}}]
 
     # Configure mock strategy
     mock_update_strategy_instance = AsyncMock()
-    mock_update_strategy_instance.execute.side_effect = ConflictError(conflicts=conflict_details) # Strategy raises ConflictError
+    mock_update_strategy_instance.execute.side_effect = ConflictError(conflicts=conflict_details)
     mock_update_strategy_class.return_value = mock_update_strategy_instance
 
     # Configure mock TaskManager
@@ -204,10 +197,10 @@ async def test_handle_structured_update_conflict(
     mock_artifact = Artifact(name="mock_conflict", parts=[Part(type="data", data={'conflict': True})])
     mock_task_manager.require_input_task.return_value = Task(id=task_id, status=mock_status, artifacts=[mock_artifact], history=[])
 
-    # Call the handler
+    # Call the handler, passing the payload dict directly
     result_task = await handle_structured_update(
         task_id=task_id,
-        message=valid_update_payload,
+        payload=valid_update_payload_dict,
         task_manager=mock_task_manager,
         db_service=mock_db_service,
         conflict_resolver=conflict_resolver,
@@ -216,7 +209,11 @@ async def test_handle_structured_update_conflict(
 
     # Assertions for strategy
     mock_update_strategy_class.assert_called_once_with(db_service=mock_db_service, conflict_resolver=conflict_resolver, date_utils=date_utils)
-    mock_update_strategy_instance.execute.assert_awaited_once_with(data=(event_id, ANY))
+    mock_update_strategy_instance.execute.assert_awaited_once()
+    call_args, call_kwargs = mock_update_strategy_instance.execute.await_args
+    passed_data = call_kwargs['data']
+    assert isinstance(passed_data, EventUpdate)
+    assert passed_data.id == event_id
 
     # Assertions for task manager
     mock_task_manager.require_input_task.assert_awaited_once()
@@ -243,25 +240,25 @@ async def test_handle_structured_update_not_implemented(
     conflict_resolver: ConflictResolver,
     date_utils: DateUtils,
     event_id: uuid.UUID,
-    valid_update_payload: Message,
+    valid_update_payload_dict: dict,
 ):
-    """Tests the handler when the update operation is not implemented."""
+    """Tests the handler when the update operation is not implemented with unwrapped payload."""
     task_id = "test_update_not_impl"
     error_message = "Updating recurring series time is not supported."
 
     # Configure mock strategy
     mock_update_strategy_instance = AsyncMock()
-    mock_update_strategy_instance.execute.side_effect = NotImplementedError(error_message) # Strategy raises error
+    mock_update_strategy_instance.execute.side_effect = NotImplementedError(error_message)
     mock_update_strategy_class.return_value = mock_update_strategy_instance
 
     # Configure mock TaskManager
     mock_status = TaskStatus(state=TaskState.FAILED, message=Message(role="agent", parts=[Part(type="text", text="Mock Fail")]))
     mock_task_manager.fail_task.return_value = Task(id=task_id, status=mock_status, artifacts=[], history=[])
 
-    # Call the handler
+    # Call the handler, passing the payload dict directly
     result_task = await handle_structured_update(
         task_id=task_id,
-        message=valid_update_payload,
+        payload=valid_update_payload_dict,
         task_manager=mock_task_manager,
         db_service=mock_db_service,
         conflict_resolver=conflict_resolver,
@@ -270,14 +267,18 @@ async def test_handle_structured_update_not_implemented(
 
     # Assertions for strategy
     mock_update_strategy_class.assert_called_once_with(db_service=mock_db_service, conflict_resolver=conflict_resolver, date_utils=date_utils)
-    mock_update_strategy_instance.execute.assert_awaited_once_with(data=(event_id, ANY))
+    mock_update_strategy_instance.execute.assert_awaited_once()
+    call_args, call_kwargs = mock_update_strategy_instance.execute.await_args
+    passed_data = call_kwargs['data']
+    assert isinstance(passed_data, EventUpdate)
+    assert passed_data.id == event_id
 
     # Assertions for task manager
     mock_task_manager.fail_task.assert_awaited_once()
     fail_call_args, _ = mock_task_manager.fail_task.await_args
     assert fail_call_args[0] == task_id
     assert isinstance(fail_call_args[1], Message)
-    assert error_message in fail_call_args[1].parts[0].text # Check specific error message
+    assert error_message in fail_call_args[1].parts[0].text
 
     mock_task_manager.complete_task.assert_not_called()
     mock_task_manager.require_input_task.assert_not_called()
@@ -294,25 +295,25 @@ async def test_handle_structured_update_value_error(
     conflict_resolver: ConflictResolver,
     date_utils: DateUtils,
     event_id: uuid.UUID,
-    valid_update_payload: Message,
+    valid_update_payload_dict: dict,
 ):
-    """Tests the handler when a ValueError occurs during update (e.g., invalid instance time)."""
+    """Tests the handler when a ValueError occurs during update with unwrapped payload."""
     task_id = "test_update_value_err"
     error_message = "Original start time missing for instance update."
 
     # Configure mock strategy
     mock_update_strategy_instance = AsyncMock()
-    mock_update_strategy_instance.execute.side_effect = ValueError(error_message) # Strategy raises error
+    mock_update_strategy_instance.execute.side_effect = ValueError(error_message)
     mock_update_strategy_class.return_value = mock_update_strategy_instance
 
     # Configure mock TaskManager
     mock_status = TaskStatus(state=TaskState.FAILED, message=Message(role="agent", parts=[Part(type="text", text="Mock Fail")]))
     mock_task_manager.fail_task.return_value = Task(id=task_id, status=mock_status, artifacts=[], history=[])
 
-    # Call the handler
+    # Call the handler, passing the payload dict directly
     result_task = await handle_structured_update(
         task_id=task_id,
-        message=valid_update_payload,
+        payload=valid_update_payload_dict,
         task_manager=mock_task_manager,
         db_service=mock_db_service,
         conflict_resolver=conflict_resolver,
@@ -321,14 +322,18 @@ async def test_handle_structured_update_value_error(
 
     # Assertions for strategy
     mock_update_strategy_class.assert_called_once_with(db_service=mock_db_service, conflict_resolver=conflict_resolver, date_utils=date_utils)
-    mock_update_strategy_instance.execute.assert_awaited_once_with(data=(event_id, ANY))
+    mock_update_strategy_instance.execute.assert_awaited_once()
+    call_args, call_kwargs = mock_update_strategy_instance.execute.await_args
+    passed_data = call_kwargs['data']
+    assert isinstance(passed_data, EventUpdate)
+    assert passed_data.id == event_id
 
     # Assertions for task manager
     mock_task_manager.fail_task.assert_awaited_once()
     fail_call_args, _ = mock_task_manager.fail_task.await_args
     assert fail_call_args[0] == task_id
     assert isinstance(fail_call_args[1], Message)
-    assert error_message in fail_call_args[1].parts[0].text # Check specific error message
+    assert error_message in fail_call_args[1].parts[0].text
 
     mock_task_manager.complete_task.assert_not_called()
     mock_task_manager.require_input_task.assert_not_called()
@@ -346,21 +351,15 @@ async def test_handle_structured_update_validation_error(
     date_utils: DateUtils,
     event_id: uuid.UUID,
 ):
-    """Tests the handler with invalid structured update payload."""
+    """Tests the handler with invalid structured update payload (dict)."""
     task_id = "test_update_validation_err"
-    invalid_payload = {"event_id": str(event_id), "update_data": {"start_time": "invalid-date"}}
-
-    # Create a message object with the invalid payload in the data field
-    invalid_message = Message(
-        role="user",
-        parts=[Part(type="data", data=invalid_payload)]
-    )
+    invalid_payload = {"id": str(event_id), "start_time": "invalid-date"}
 
     # Call the handler and expect InvalidParamsError
     with pytest.raises(InvalidParamsError) as exc_info:
         await handle_structured_update(
             task_id=task_id,
-            message=invalid_message, # Use the message object
+            payload=invalid_payload,
             task_manager=mock_task_manager,
             db_service=mock_db_service,
             conflict_resolver=conflict_resolver,
@@ -369,10 +368,8 @@ async def test_handle_structured_update_validation_error(
 
     # Assertions
     assert "Invalid data provided for event update." in str(exc_info.value)
-    assert isinstance(exc_info.value.data, list) # Pydantic error list
+    assert isinstance(exc_info.value.data, list)
     assert isinstance(exc_info.value.__cause__, ValidationError)
-
-    # Assert strategy and task manager were not called
     mock_update_strategy_class.assert_not_called()
     mock_task_manager.complete_task.assert_not_called()
     mock_task_manager.fail_task.assert_not_called()
@@ -387,22 +384,22 @@ async def test_handle_structured_update_internal_error(
     conflict_resolver: ConflictResolver,
     date_utils: DateUtils,
     event_id: uuid.UUID,
-    valid_update_payload: Message,
+    valid_update_payload_dict: dict,
 ):
-    """Tests the handler when an unexpected error occurs."""
+    """Tests the handler when an unexpected error occurs with unwrapped payload."""
     task_id = "test_update_internal_err"
     original_exception = Exception("Unexpected DB failure")
 
     # Configure mock strategy
     mock_update_strategy_instance = AsyncMock()
-    mock_update_strategy_instance.execute.side_effect = original_exception # Strategy raises error
+    mock_update_strategy_instance.execute.side_effect = original_exception
     mock_update_strategy_class.return_value = mock_update_strategy_instance
 
-    # Call the handler and expect InternalError
+    # Call the handler, passing the payload dict directly
     with pytest.raises(InternalError) as exc_info:
         await handle_structured_update(
             task_id=task_id,
-            message=valid_update_payload,
+            payload=valid_update_payload_dict,
             task_manager=mock_task_manager,
             db_service=mock_db_service,
             conflict_resolver=conflict_resolver,
@@ -415,7 +412,12 @@ async def test_handle_structured_update_internal_error(
 
     # Assert strategy was called, but task manager was not
     mock_update_strategy_class.assert_called_once_with(db_service=mock_db_service, conflict_resolver=conflict_resolver, date_utils=date_utils)
-    mock_update_strategy_instance.execute.assert_awaited_once_with(data=(event_id, ANY))
+    mock_update_strategy_instance.execute.assert_awaited_once()
+    call_args, call_kwargs = mock_update_strategy_instance.execute.await_args
+    passed_data = call_kwargs['data']
+    assert isinstance(passed_data, EventUpdate)
+    assert passed_data.id == event_id
+
     mock_task_manager.complete_task.assert_not_called()
     mock_task_manager.fail_task.assert_not_called()
     mock_task_manager.require_input_task.assert_not_called()

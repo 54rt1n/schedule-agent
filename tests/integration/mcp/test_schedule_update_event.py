@@ -13,7 +13,7 @@ from sa.db.strategies.get_events_in_range import GetEventsInRangeStrategy
 from sa.db.strategies.get_event_by_id import GetEventByIdStrategy
 from sa.db.models import Event
 from sa.db.service import DatabaseService
-from sa.db.dao import EventCreate
+from sa.db.dao import EventCreate, EventGetById
 from sa.core.exceptions import (
     EventNotFoundError, ConflictError, DatabaseError
 )
@@ -63,6 +63,7 @@ async def test_schedule_update_event_success(
 
     # Only include fields that are actually being updated
     update_data = {
+        "id": event_id_str,
         "title": new_title,
         "location": new_location,
         # "start_time": existing_event.start_time.isoformat(), # DO NOT SEND if not changing
@@ -72,17 +73,12 @@ async def test_schedule_update_event_success(
         # "rrule": existing_event.rrule, # Only include if updating
     }
 
-    params = {
-        "event_id": event_id_str,
-        "update_data": update_data,
-    }
-
     # Action - Use schedule_update_event handler
     result = await schedule_update_event(
-        **params,
         db_service=mcp_test_db_service,
         conflict_resolver=mcp_test_conflict_resolver,
-        date_utils=mcp_test_date_utils
+        date_utils=mcp_test_date_utils,
+        update_data=update_data
     )
 
     # Assert Handler Response
@@ -101,7 +97,7 @@ async def test_schedule_update_event_success(
 
     # Assert Database State using the strategy
     get_event_strategy = GetEventByIdStrategy(db_service=mcp_test_db_service)
-    db_event = await get_event_strategy.execute(data=event_id_uuid)
+    db_event = await get_event_strategy.execute(data=EventGetById(id=event_id_uuid))
     assert db_event is not None
     assert db_event.id == existing_event.id
     assert db_event.title == new_title

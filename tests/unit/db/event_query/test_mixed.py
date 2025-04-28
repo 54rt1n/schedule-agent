@@ -3,7 +3,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sa.core.logging_config import get_logger
-from sa.db.dao import EventCreate
+from sa.db.dao import EventCreate, TimeRange
 from sa.db.service import DatabaseService
 from sa.db.strategies.create_event import CreateEventStrategy
 from sa.db.strategies.get_events_in_range import GetEventsInRangeStrategy
@@ -55,7 +55,7 @@ async def test_get_events_in_range_mix_simple_recurring_inside(db_service: Datab
         db_service=db_service,
         date_utils=date_utils
     )
-    strategy_input = (query_start, query_end)
+    strategy_input = TimeRange(start_time=query_start, end_time=query_end)
     retrieved_events = await strategy.execute(data=strategy_input)
 
     # --- Assert ---
@@ -125,7 +125,7 @@ async def test_get_events_in_range_mix_simple_outside_recurring_inside(db_servic
         db_service=db_service,
         date_utils=date_utils
     )
-    strategy_input = (query_start, query_end)
+    strategy_input = TimeRange(start_time=query_start, end_time=query_end)
     retrieved_events = await strategy.execute(data=strategy_input)
 
     # --- Assert ---
@@ -178,7 +178,7 @@ async def test_get_events_in_range_timezone_non_utc(db_service: DatabaseService,
         db_service=db_service,
         date_utils=date_utils
     )
-    strategy_input = (query_start_utc, query_end_utc)
+    strategy_input = TimeRange(start_time=query_start_utc, end_time=query_end_utc)
     retrieved_events = await strategy.execute(data=strategy_input)
 
     # --- Assert ---
@@ -271,7 +271,7 @@ async def test_get_events_in_range_dst_transitions(
         db_service=db_service,
         date_utils=date_utils
     )
-    strategy_input = (query_range_start_utc, query_range_end_utc)
+    strategy_input = TimeRange(start_time=query_range_start_utc, end_time=query_range_end_utc)
     retrieved_event_instances = await strategy.execute(data=strategy_input)
 
     # Assert

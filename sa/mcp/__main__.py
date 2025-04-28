@@ -19,7 +19,7 @@ async def main(settings: Settings):
     # --- Run Async Setup Once ---
     mcp_instance: FastMCP | None = None
     try:
-        mcp_instance = await setup_mcp_server()
+        mcp_instance = await setup_mcp_server(settings)
         if not mcp_instance:
              logger.critical("MCP instance setup failed. Exiting.")
              sys.exit(1)

@@ -5,7 +5,7 @@ import uuid
 from sa.db.service import DatabaseService
 from sa.db.strategies.get_event_by_id import GetEventByIdStrategy
 from sa.db.strategies.create_event import CreateEventStrategy # Needed for setup
-from sa.db.dao import EventCreate
+from sa.db.dao import EventCreate, EventGetById
 from sa.db.models import Event
 
 
@@ -31,7 +31,7 @@ async def test_get_event_by_id_simple(
     strategy = GetEventByIdStrategy(db_service=db_service)
 
     # --- Act ---
-    retrieved_event = await strategy.execute(data=event_id_to_find)
+    retrieved_event = await strategy.execute(data=EventGetById(id=event_id_to_find))
 
     # --- Assert ---
     assert retrieved_event is not None
@@ -41,5 +41,5 @@ async def test_get_event_by_id_simple(
 
     # Test retrieving non-existent returns None
     non_existent_id = uuid.uuid4()
-    retrieved_none = await strategy.execute(data=non_existent_id)
+    retrieved_none = await strategy.execute(data=EventGetById(id=non_existent_id))
     assert retrieved_none is None 

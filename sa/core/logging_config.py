@@ -85,7 +85,7 @@ def setup_logging(settings: Settings):
 
     # Configure the standard library root logger
     root_logger = logging.getLogger()
-    root_logger.setLevel(logging.CRITICAL)
+    root_logger.setLevel(level)
 
     # Set up a handler writing to stdout
     handler = logging.StreamHandler(sys.stdout)

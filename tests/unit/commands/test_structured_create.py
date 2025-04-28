@@ -94,7 +94,7 @@ async def test_handle_structured_create_success(
         # Call the handler, passing real date_utils and conflict_resolver
         result_task = await handle_structured_create(
             task_id=task_id,
-            input_data=valid_create_input,
+            payload=valid_create_input,
             task_manager=mock_task_manager,
             db_service=mock_db_service,
             conflict_resolver=conflict_resolver,
@@ -172,7 +172,7 @@ async def test_handle_structured_create_conflict(
         # Call the handler
         result_task = await handle_structured_create(
             task_id=task_id,
-            input_data=valid_create_input,
+            payload=valid_create_input,
             task_manager=mock_task_manager,
             db_service=mock_db_service,
             conflict_resolver=conflict_resolver,
@@ -233,7 +233,7 @@ async def test_handle_structured_create_conflict_alternative_generation_fails(
         with pytest.raises(InternalError) as exc_info:
             await handle_structured_create(
                 task_id=task_id,
-                input_data=valid_create_input,
+                payload=valid_create_input,
                 task_manager=mock_task_manager,
                 db_service=mock_db_service,
                 conflict_resolver=conflict_resolver,
@@ -267,7 +267,7 @@ async def test_handle_structured_create_invalid_data(
     with pytest.raises(InvalidParamsError) as exc_info:
         await handle_structured_create(
             task_id=task_id,
-            input_data=invalid_format_create_input,
+            payload=invalid_format_create_input,
             task_manager=mock_task_manager,
             db_service=mock_db_service,
             conflict_resolver=conflict_resolver,
@@ -302,7 +302,7 @@ async def test_handle_structured_create_not_matching_criteria(
     with pytest.raises(InvalidParamsError) as exc_info:
         await handle_structured_create(
             task_id=task_id,
-            input_data=non_create_input,
+            payload=non_create_input,
             task_manager=mock_task_manager,
             db_service=mock_db_service,
             conflict_resolver=conflict_resolver,

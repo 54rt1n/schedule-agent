@@ -27,7 +27,7 @@ def upgrade() -> None:
         sa.Column('id', sa.Uuid(), nullable=False),
         sa.Column('session_id', sa.Uuid(), nullable=True),
         sa.Column('state', sa.String(), nullable=False),
-        sa.Column('status_message_json', sa.Text(), nullable=True),
+        sa.Column('status', sa.Text(), nullable=True),
         sa.Column('params_json', sa.Text(), nullable=True),
         sa.Column('artifacts_json', sa.Text(), nullable=True),
         sa.Column('history_json', sa.Text(), nullable=True),

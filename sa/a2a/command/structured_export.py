@@ -1,13 +1,15 @@
 # sa/a2a/command/structured_export.py
-"""Handles the export_calendar intent from NLP result."""
+"""Handles the export_calendar intent."""
 
 import base64
+from typing import Any
 
-from sa.a2a.dto import Artifact, FileContent, Message, Part, Task
+from sa.a2a.dto import Artifact, FileContent, Task, Part, Message
 from sa.a2a.exceptions import InvalidParamsError, InternalError
 from sa.a2a.task_manager import SchedulingTaskManager
 from sa.core.logging_config import get_logger
 from sa.db.service import DatabaseService
+from sa.db.dao import TimeRange
 from sa.event.date_utils import DateUtils
 from sa.event.exporters.base import CalendarExporter
 from sa.db.strategies.get_events_in_range import GetEventsInRangeStrategy
@@ -16,28 +18,26 @@ logger = get_logger(__name__)
 
 async def handle_structured_export(
     task_id: str,
-    message: Message,
+    payload: dict[str, Any],
     task_manager: SchedulingTaskManager,
     db_service: DatabaseService,
     exporters: dict[str, CalendarExporter],
     date_utils: DateUtils,
 ) -> Task:
-    """Handles the export_calendar intent from NLP result."""
+    """Handles structured calendar exports based on the unwrapped payload (dict)."""
     logger.info(f"Handling export_calendar intent for task {task_id}")
     try:
-        input_data = message.parts[0].data
+        # 2. Parse format and date range from payload
+        export_format = payload.get("format", "ics").lower()
+        
+        # Get the nested date_info dictionary, default to empty dict if not found
+        date_info_payload = payload.get("date_info", {})
+        if not isinstance(date_info_payload, dict):
+            raise InvalidParamsError("Invalid structure for date_info in payload.")
 
-        # Ensure input_data is a dict before accessing keys
-        if not isinstance(input_data, dict):
-            raise InvalidParamsError("Invalid data format for export payload.")
-
-        # 1. Parse format and date range
-        export_format = input_data.get("format", "ics").lower()
-
-        # Use DateUtils to parse the range from NLP date_info (which is a dict within input_data)
-        date_info_dict = input_data.get("date_info", {})
-        start_date_str = date_info_dict.get("start_date")
-        end_date_str = date_info_dict.get("end_date")
+        # Extract dates from the nested dictionary
+        start_date_str = date_info_payload.get("start_date") 
+        end_date_str = date_info_payload.get("end_date")
 
         # Let DateUtils handle parsing, defaults, and errors
         range_start_utc, range_end_utc = date_utils.parse_nlp_date_range(
@@ -52,33 +52,31 @@ async def handle_structured_export(
             end=range_end_utc,
         )
 
-        # 2. Get the correct exporter
+        # 3. Get the correct exporter
         exporter = exporters.get(export_format)
         if not exporter:
-            # This is an invalid parameter from the user/NLP, handle it here
             raise InvalidParamsError(f"Unsupported export format requested: {export_format}")
 
-        # 3. Query events from DB using the strategy
+        # 4. Query events from DB using the strategy
         get_events_strategy = GetEventsInRangeStrategy(
-            db_service=db_service, date_utils=date_utils # Pass dependencies
+            db_service=db_service, date_utils=date_utils
         )
-        # Strategy expects a tuple (start_dt, end_dt) as data
-        events_to_export = await get_events_strategy.execute(data=(range_start_utc, range_end_utc))
+        time_range = TimeRange(start_time=range_start_utc, end_time=range_end_utc)
+        events_to_export = await get_events_strategy.execute(data=time_range)
 
-        # 4. Export events
-        # Let ExporterError or other Exceptions propagate if they occur here
+        # 5. Export events
         exported_data = exporter.export(events_to_export)
         mime_type = exporter.get_mime_type()
         file_name = f"calendar.{export_format}"
 
-        # 5. Base64 encode the result
+        # 6. Base64 encode the result
         encoded_bytes = base64.b64encode(exported_data.encode("utf-8")).decode("utf-8")
 
-        # 6. Create Artifact
+        # 7. Create Artifact
         file_content = FileContent(name=file_name, mimeType=mime_type, bytes=encoded_bytes)
         artifact = Artifact(name=file_name, parts=[Part(type="file", file=file_content)])
 
-        # 7. Complete task
+        # 8. Complete task
         result_message = f"Calendar exported successfully as {file_name}."
         agent_message = Message(role="agent", parts=[Part(type="text", text=result_message)])
         final_task = await task_manager.complete_task(task_id, agent_message, artifact)
@@ -86,7 +84,11 @@ async def handle_structured_export(
         return final_task
 
     except InvalidParamsError as ipe:
-        # Catch InvalidParamsError specifically to let it propagate clearly
         logger.warning(f"InvalidParamsError during export: {ipe.message}", task_id=task_id)
         raise
-    # Let other errors (DatabaseError, ExporterError, etc.) propagate
+    except ValueError as ve: # Catch potential errors from date parsing
+        logger.warning(f"ValueError during export processing (likely date parsing): {ve}", task_id=task_id)
+        raise InvalidParamsError(f"Invalid date format provided for export: {ve}") from ve
+    except Exception as e:
+        logger.exception(f"Unexpected error processing structured export for task {task_id}: {e}")
+        raise InternalError(message=f"An unexpected error occurred during export: {e}") from e

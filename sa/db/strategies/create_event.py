@@ -55,7 +55,7 @@ class CreateEventStrategy(DatabaseExecutionStrategy[EventCreate, Event]):
         start_aware_utc = self.date_utils.normalize_to_utc(data.start_time, data.time_zone)
         end_aware_utc = self.date_utils.normalize_to_utc(data.end_time, data.time_zone)
 
-        get_events = (start_aware_utc, end_aware_utc)
+        get_events = TimeRange(start_time=start_aware_utc, end_time=end_aware_utc)
 
         potential_conflicts = await self.get_events_in_range_strategy.execute(data=get_events)
         logger.debug(f"Fetched {len(potential_conflicts)} potential conflicts for check.")

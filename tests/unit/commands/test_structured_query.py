@@ -30,13 +30,13 @@ async def test_handle_structured_query(
     mock_task_manager: MagicMock,
     mock_db_service: AsyncMock,
 ):
-    """Test the handle_structured_query handler with valid input."""
+    """Test the handle_structured_query handler with valid unwrapped payload."""
     task_id = str(uuid.uuid4())
 
-    # Example structured query payload
-    query = EventQuery(title_contains="Meeting")
-    query_data = query.model_dump(exclude_unset=True) # Use exclude_unset like handler
-    message = Message(role="user", parts=[Part(type="data", data=query_data)])
+    # Prepare the raw query payload dictionary
+    query_dao = EventQuery(title_contains="Meeting")
+    query_payload = query_dao.model_dump(exclude_unset=True)
+    # No longer need to wrap in Message/Part
 
     # Mock Event and Strategy response
     mock_event = Event(
@@ -55,10 +55,10 @@ async def test_handle_structured_query(
     # Mock TaskManager response
     mock_task_manager.complete_task.return_value = mock_completed_task
 
-    # Call the handler
+    # Call the handler, passing the payload dict directly
     final_task = await handle_structured_query(
         task_id=task_id,
-        message=message,
+        payload=query_payload, # Pass the dict here
         task_manager=mock_task_manager,
         db_service=mock_db_service,
     )
@@ -67,9 +67,9 @@ async def test_handle_structured_query(
     assert final_task is not None
     assert final_task.status.state == TaskState.COMPLETED
 
-    # Check Strategy call
+    # Check Strategy call (passes the DAO)
     mock_find_strategy_class.assert_called_once_with(db_service=mock_db_service)
-    mock_find_strategy_instance.execute.assert_awaited_once_with(data=query)
+    mock_find_strategy_instance.execute.assert_awaited_once_with(data=query_dao)
 
     # Check TaskManager call
     expected_result_list = [

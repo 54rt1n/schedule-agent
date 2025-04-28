@@ -110,15 +110,15 @@ async def test_update_non_recurring_event(
     mock_db_service.mock_session.refresh = AsyncMock()
 
     update_payload = EventUpdate(
+        id=event_id,
         title="Updated Non-Recurring Title",
         location="Room 2", notes="New Notes"
     )
 
     strategy = UpdateEventStrategy(db_service=mock_db_service, date_utils=date_utils, conflict_resolver=conflict_resolver)
-    strategy_input = (event_id, update_payload)
 
     # --- Act ---
-    updated_result = await strategy.execute(data=strategy_input)
+    updated_result = await strategy.execute(data=update_payload)
 
     # --- Assert ---
     assert mock_db_service.mock_session.execute.await_count == 3
@@ -220,6 +220,7 @@ async def test_update_recurring_instance(
     mock_db_service.mock_session.rollback = AsyncMock()
 
     update_payload = EventUpdate(
+        id=event_id,
         title="Recurring Weekly (Late Start Instance)",
         location="Office B",
         original_start_time=target_instance_original_start_local, # Identify instance
@@ -229,10 +230,9 @@ async def test_update_recurring_instance(
     )
 
     strategy = UpdateEventStrategy(db_service=mock_db_service, date_utils=date_utils, conflict_resolver=conflict_resolver)
-    strategy_input = (event_id, update_payload)
 
     # --- Act ---
-    updated_result = await strategy.execute(data=strategy_input)
+    updated_result = await strategy.execute(data=update_payload)
 
     # --- Assert ---
     assert mock_db_service.mock_session.execute.await_count == 2 # Base event select, Mod instance select
@@ -314,6 +314,7 @@ async def test_update_recurring_series_simple_fields(
     mock_db_service.mock_session.refresh = AsyncMock()
 
     update_payload = EventUpdate(
+        id=event_id,
         title="Project Omega Sync",
         location="Room Y",
         # NOTE: No original_start_time indicates series update
@@ -321,10 +322,9 @@ async def test_update_recurring_series_simple_fields(
     )
 
     strategy = UpdateEventStrategy(db_service=mock_db_service, date_utils=date_utils, conflict_resolver=conflict_resolver)
-    strategy_input = (event_id, update_payload)
 
     # --- Act ---
-    updated_result = await strategy.execute(data=strategy_input)
+    updated_result = await strategy.execute(data=update_payload)
 
     # --- Assert ---
     assert mock_db_service.mock_session.execute.await_count == 3 # Select, Update, Refetch
@@ -379,12 +379,11 @@ async def test_update_event_not_found(
     mock_db_service.mock_session.flush = AsyncMock()
     mock_db_service.mock_session.refresh = AsyncMock()
 
-    update_payload = EventUpdate(title="Should Not Update")
+    update_payload = EventUpdate(id=non_existent_id, title="Should Not Update")
     strategy = UpdateEventStrategy(db_service=mock_db_service, date_utils=date_utils, conflict_resolver=conflict_resolver)
-    strategy_input = (non_existent_id, update_payload)
 
     # --- Act ---
-    updated_result = await strategy.execute(data=strategy_input)
+    updated_result = await strategy.execute(data=update_payload)
 
     # --- Assert ---
     mock_db_service.mock_session.execute.assert_awaited_once()
@@ -415,14 +414,13 @@ async def test_update_recurring_series_time_raises_not_implemented(
     mock_execute_result.scalar_one_or_none = MagicMock(return_value=mock_initial_event)
     mock_db_service.mock_session.execute = AsyncMock(return_value=mock_execute_result)
 
-    update_payload = EventUpdate(start_time=datetime(2025, 1, 6, 9, 30)) # Attempt time change
+    update_payload = EventUpdate(id=event_id, start_time=datetime(2025, 1, 6, 9, 30)) # Attempt time change
     strategy = UpdateEventStrategy(db_service=mock_db_service, date_utils=date_utils, conflict_resolver=conflict_resolver)
-    strategy_input = (event_id, update_payload)
 
     # --- Act & Assert ---
     # Expect DatabaseError wrapping NotImplementedError
     with pytest.raises(DatabaseError) as exc_info:
-        await strategy.execute(data=strategy_input)
+        await strategy.execute(data=update_payload)
 
     mock_db_service.mock_session.execute.assert_awaited_once()
     assert isinstance(exc_info.value.__cause__, NotImplementedError)
@@ -452,6 +450,7 @@ async def test_update_instance_on_non_recurring_raises_value_error(
     mock_db_service.mock_session.execute = AsyncMock(return_value=mock_execute_result)
 
     update_payload = EventUpdate(
+        id=event_id,
         original_start_time=initial_start_time, # Provide original_start_time
         title="This Should Fail"
         # NOTE: start_time, end_time, time_zone are missing which will trigger
@@ -460,12 +459,11 @@ async def test_update_instance_on_non_recurring_raises_value_error(
         # --> Let's stick to the original logic, the check should raise ValueError("Cannot specify...")
     )
     strategy = UpdateEventStrategy(db_service=mock_db_service, date_utils=date_utils, conflict_resolver=conflict_resolver)
-    strategy_input = (event_id, update_payload)
 
     # --- Act & Assert ---
     # Expect DatabaseError wrapping ValueError
     with pytest.raises(DatabaseError) as exc_info:
-        await strategy.execute(data=strategy_input)
+        await strategy.execute(data=update_payload)
 
     mock_db_service.mock_session.execute.assert_awaited_once()
     assert isinstance(exc_info.value.__cause__, ValueError)
@@ -540,6 +538,7 @@ async def test_update_existing_recurring_instance(
 
     # New instance time/tz and title
     update_payload = EventUpdate(
+        id=event_id,
         original_start_time=datetime(2024, 10, 14, 10, 0, 0), # Target instance
         start_time=datetime(2024, 10, 14, 10, 30, 0),
         end_time=datetime(2024, 10, 14, 11, 30, 0),
@@ -549,10 +548,9 @@ async def test_update_existing_recurring_instance(
     )
 
     strategy = UpdateEventStrategy(db_service=mock_db_service, date_utils=date_utils, conflict_resolver=conflict_resolver)
-    strategy_input = (event_id, update_payload)
 
     # --- Act ---
-    updated_result = await strategy.execute(data=strategy_input)
+    updated_result = await strategy.execute(data=update_payload)
 
     # --- Assert ---
     assert mock_db_service.mock_session.execute.await_count == 4 # Select Event, Select Mod, Update Mod, Refetch Mod

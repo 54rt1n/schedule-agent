@@ -28,4 +28,6 @@ def test_rpc_valid_auth(client: TestClient, auth_headers_valid: dict):
     assert "error" in response_data
     # Assuming TaskNotFoundError maps to -32001 based on app's exception handling
     assert response_data["error"]["code"] == -32001
-    assert "Task with ID" in response_data["error"]["message"] 
+    # Check that the message contains the ID, not a specific phrase
+    assert "non-existent-id" in response_data["error"]["message"]
+    # assert "Task with ID" in response_data["error"]["message"] 

@@ -40,7 +40,7 @@ async def test_handle_structured_query_success_by_id(
     # 3. Call the handler
     final_task = await handle_structured_query(
         task_id=task_id,
-        message=query_message,
+        payload=query_params.model_dump(),
         task_manager=task_manager,
         db_service=db_service,
     )
@@ -75,7 +75,7 @@ async def test_handle_structured_query_no_results(
 
     final_task = await handle_structured_query(
         task_id=task_id,
-        message=query_message,
+        payload=query_params.model_dump(),
         task_manager=task_manager,
         db_service=db_service,
     )
@@ -105,7 +105,7 @@ async def test_handle_structured_query_invalid_payload(
     with pytest.raises(InvalidParamsError) as exc_info:
         await handle_structured_query(
             task_id=task_id,
-            message=query_message,
+            payload=invalid_data,
             task_manager=task_manager,
             db_service=db_service,
         )
@@ -118,16 +118,17 @@ async def test_handle_structured_query_invalid_payload(
     task_state = await task_manager.get_task(task_id)
     assert task_state.status.state == TaskState.WORKING
 
-
 @pytest.mark.asyncio
-async def test_handle_structured_query_missing_data_part(
+async def test_handle_structured_query_invalid_data_type(
     task_manager: SchedulingTaskManager,
     db_service: DatabaseService,
 ):
-    """Test query raises InvalidParamsError for missing or incorrect data part."""
+    """Test query raises InvalidParamsError for invalid data type in payload."""
     task_id = str(uuid4())
-    # Use a message with a non-data part type
-    query_message = Message(role="user", parts=[Part(type="text", text="find events")])
+    # Use a payload with a valid field name but invalid data type
+    invalid_payload = {"start_time": "not-a-real-date"} # start_time is defined, but value is invalid
+    # Message is only needed for task creation, not passed to handler
+    query_message = Message(role="user", parts=[Part(type="data", data=invalid_payload)])
 
     params = TaskSendParams(id=task_id, message=query_message, intent="query_events")
     await task_manager.create_task(params)
@@ -136,14 +137,17 @@ async def test_handle_structured_query_missing_data_part(
     with pytest.raises(InvalidParamsError) as exc_info:
         await handle_structured_query(
             task_id=task_id,
-            message=query_message,
+            payload=invalid_payload,
             task_manager=task_manager,
             db_service=db_service,
         )
 
     # Assert on the exception
-    assert "Missing or invalid data part" in str(exc_info.value)
+    assert "Invalid query parameters" in str(exc_info.value)
+    assert isinstance(exc_info.value.data, list) # Should contain Pydantic errors
 
     # Verify task state wasn't changed to failed
     task_state = await task_manager.get_task(task_id)
-    assert task_state.status.state == TaskState.WORKING 
+    assert task_state.status.state == TaskState.WORKING
+
+# TODO: Add tests for other query criteria (participants, location etc.) 

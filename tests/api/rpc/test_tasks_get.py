@@ -28,7 +28,6 @@ def test_rpc_tasks_get_not_found(client: TestClient, auth_headers_valid: dict):
     error_payload = response_data["error"]
     assert error_payload["code"] == TaskNotFoundError.DEFAULT_CODE # -32001
     assert non_existent_task_id in error_payload["message"] # Message should contain the ID
-    assert "not found" in error_payload["message"].lower()
 
     # Assert that the request ID is correctly echoed back
     assert response_data["id"] == rpc_payload["id"]

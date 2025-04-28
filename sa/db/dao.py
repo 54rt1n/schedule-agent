@@ -8,6 +8,12 @@ from typing import Union
 import uuid
 
 from sa.db.models import EventBase, Event, ModifiedInstance
+# No DTO imports needed here anymore
+
+class EventGetById(BaseModel):
+    """Parameters for getting an event by its ID."""
+
+    id: uuid.UUID
 
 
 class EventQuery(BaseModel):
@@ -37,6 +43,7 @@ class EventCreate(EventBase):
 
 # Model for updating events via API (all fields optional)
 class EventUpdate(SQLModel):
+    id: uuid.UUID
     title: str | None = None
     start_time: datetime | None = None
     end_time: datetime | None = None
@@ -55,9 +62,43 @@ class EventDelete(SQLModel):
 
 
 EventResponse = Union[Event, ModifiedInstance]
-TimeRange = tuple[datetime, datetime]
 
-class TaskStatus(BaseModel):
-    """Status of an A2A Task."""
 
-    status_message: str | None = None
+class GetA2ATaskById(BaseModel):
+    """Parameters for getting an A2A task by its ID."""
+
+    id: str # Changed from UUID to str
+
+
+class TimeRange(BaseModel):
+    """Parameters for a time range."""
+
+    start_time: datetime
+    end_time: datetime
+
+
+class A2ATaskCreate(BaseModel):
+    """Parameters for creating an initial A2A task record in the database.
+
+    Contains fields corresponding to the A2ATask model, ready for persistence.
+    """
+    id: str
+    session_id: str | None = None
+    state: str  # Initial state enum value
+    status_message_json: str | None = None # JSON string of initial TaskStatus.message
+    status_timestamp: datetime | None = None # Timestamp of initial TaskStatus
+    artifacts_json: str | None = None # JSON string of initial Task.artifacts (likely '[]' or null)
+    history_json: str | None = None # JSON string of initial Task.history (e.g., '[initial_message]')
+    metadata_json: str | None = None # JSON string of initial Task.metadata
+
+
+class UpdateA2ATaskStatus(BaseModel):
+    """Parameters for updating the status and potentially history of an A2A task.
+
+    The Task Manager determines if history needs updating based on the status change.
+    """
+    id: str
+    new_state: str # The new state value (e.g., "working", "completed")
+    new_status_message_json: str | None = None # JSON string of the new TaskStatus.message
+    new_status_timestamp: datetime | None = None # Timestamp of the new TaskStatus
+    new_history_json: str | None = None

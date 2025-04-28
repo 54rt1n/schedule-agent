@@ -38,7 +38,7 @@ async def test_delete_event_success(
     mock_db_service.mock_session.rollback = AsyncMock()
 
     strategy = DeleteEventStrategy(db_service=mock_db_service)
-    strategy_input: EventDelete = event_id_to_delete # Use DAO type hint
+    strategy_input = EventDelete(id=event_id_to_delete) # Use DAO
 
     # --- Act ---
     deleted = await strategy.execute(data=strategy_input)
@@ -72,7 +72,7 @@ async def test_delete_event_not_found(
     mock_db_service.mock_session.rollback = AsyncMock()
 
     strategy = DeleteEventStrategy(db_service=mock_db_service)
-    strategy_input: EventDelete = non_existent_id
+    strategy_input = EventDelete(id=non_existent_id) # Use DAO
 
     # --- Act ---
     deleted = await strategy.execute(data=strategy_input)
@@ -112,7 +112,7 @@ async def test_delete_event_db_error(
     mock_db_service.mock_session.rollback = AsyncMock() # Ensure rollback mock exists
 
     strategy = DeleteEventStrategy(db_service=mock_db_service)
-    strategy_input: EventDelete = event_id_to_delete
+    strategy_input = EventDelete(id=event_id_to_delete) # Use DAO
 
     with pytest.raises(DatabaseError) as exc_info:
         # --- Act ---

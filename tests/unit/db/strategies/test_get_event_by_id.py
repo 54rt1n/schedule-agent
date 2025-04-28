@@ -6,6 +6,7 @@ from unittest.mock import patch, MagicMock, AsyncMock
 from sa.core.logging_config import get_logger
 from sa.db.models import Event
 from sa.db.strategies.get_event_by_id import GetEventByIdStrategy
+from sa.db.dao import EventGetById
 from sa.db.service import DatabaseService
 
 logger = get_logger(__name__)
@@ -42,7 +43,7 @@ async def test_get_event_by_id_found(
     strategy = GetEventByIdStrategy(db_service=mock_db_service)
 
     # --- Act ---
-    retrieved_event = await strategy.execute(data=event_id_to_find)
+    retrieved_event = await strategy.execute(data=EventGetById(id=event_id_to_find))
 
     # --- Assert ---
     assert retrieved_event is not None
@@ -78,7 +79,7 @@ async def test_get_event_by_id_not_found(
     strategy = GetEventByIdStrategy(db_service=mock_db_service)
 
     # --- Act ---
-    retrieved_event = await strategy.execute(data=non_existent_id)
+    retrieved_event = await strategy.execute(data=EventGetById(id=non_existent_id))
 
     # --- Assert ---
     assert retrieved_event is None

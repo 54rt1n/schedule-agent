@@ -3,7 +3,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sa.core.logging_config import get_logger
-from sa.db.dao import EventCreate
+from sa.db.dao import EventCreate, TimeRange
 from sa.db.service import DatabaseService
 from sa.db.strategies.create_event import CreateEventStrategy
 from sa.db.strategies.get_events_in_range import GetEventsInRangeStrategy
@@ -50,7 +50,7 @@ async def test_get_events_in_range_recurring(
         db_service=db_service,
         date_utils=date_utils
     )
-    strategy_input = (range_start_aware, range_end_aware)
+    strategy_input = TimeRange(start_time=range_start_aware, end_time=range_end_aware)
     retrieved_events = await strategy.execute(data=strategy_input)
 
     # --- Assert ---
@@ -95,7 +95,7 @@ async def test_get_events_in_range_recurring_outside_range(db_service: DatabaseS
         db_service=db_service,
         date_utils=date_utils
     )
-    strategy_input = (query_start, query_end)
+    strategy_input = TimeRange(start_time=query_start, end_time=query_end)
     events = await strategy.execute(data=strategy_input)
 
     # --- Assert ---
@@ -231,7 +231,7 @@ async def test_get_events_in_range_recurring_boundaries(
     assert created_event.rrule == rrule
 
     # --- Act ---
-    strategy_input = (RECUR_QUERY_START, RECUR_QUERY_END)
+    strategy_input = TimeRange(start_time=RECUR_QUERY_START, end_time=RECUR_QUERY_END)
     retrieved_events = await get_events_in_range_strategy.execute(data=strategy_input)
 
     # --- Assert ---

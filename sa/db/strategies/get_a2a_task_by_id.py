@@ -10,17 +10,18 @@ from sa.core.logging_config import get_logger
 from sa.db.models import A2ATask
 from sa.db.service import DatabaseService
 from sa.db.strategies.base import DatabaseExecutionStrategy
+from sa.db.dao import GetA2ATaskById
 
 logger = get_logger(__name__)
 
 
-class GetA2ATaskByIdStrategy(DatabaseExecutionStrategy[str, Optional[A2ATask]]):
+class GetA2ATaskByIdStrategy(DatabaseExecutionStrategy[GetA2ATaskById, Optional[A2ATask]]):
     """Strategy to retrieve a single A2A task by its ID."""
 
     def __init__(self, db_service: DatabaseService):
         super().__init__(db_service=db_service)
 
-    async def _run(self, session: AsyncSession, data: str) -> Optional[A2ATask]:
+    async def _run(self, session: AsyncSession, data: GetA2ATaskById) -> Optional[A2ATask]:
         """
         Fetches the A2A task by ID.
 
@@ -31,7 +32,7 @@ class GetA2ATaskByIdStrategy(DatabaseExecutionStrategy[str, Optional[A2ATask]]):
         Returns:
             The A2ATask object if found, otherwise None.
         """
-        task_id = data
+        task_id = data.id
         logger.debug(f"Executing GetA2ATaskByIdStrategy for ID: {task_id}")
 
         stmt = select(A2ATask).where(A2ATask.id == task_id)

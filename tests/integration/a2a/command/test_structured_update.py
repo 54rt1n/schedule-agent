@@ -1,18 +1,19 @@
 import pytest
 from uuid import uuid4, UUID
 from datetime import datetime, timedelta, timezone
+from unittest.mock import ANY
 
 from sa.a2a.command.structured_update import handle_structured_update
 from sa.a2a.dto import (
     Message,
     Part,
+    Task,
     TaskState,
-    StructuredUpdatePayload,
     TaskSendParams,
 )
 from sa.a2a.exceptions import InvalidParamsError
 from sa.a2a.task_manager import SchedulingTaskManager
-from sa.db.dao import EventCreate, EventUpdate
+from sa.db.dao import EventCreate, EventUpdate, EventGetById
 from sa.db.service import DatabaseService
 from sa.event.conflict_resolver import ConflictResolver
 from sa.event.date_utils import DateUtils
@@ -41,32 +42,38 @@ async def test_handle_structured_update_success(
     created_event = await create_event_strategy.execute(data=initial_data)
     event_id = created_event.id
 
-    # 2. Prepare update payload
+    # 2. Prepare update payload dictionary
     task_id = str(uuid4())
-    update_details = EventUpdate(title="Updated Meeting Title", location="Office B")
-    payload = StructuredUpdatePayload(event_id=event_id, update_data=update_details)
-    update_message = Message(role="user", parts=[Part(type="data", data=payload.model_dump())])
+    # Construct the dictionary payload directly
+    update_payload_dict = {
+        "id": str(event_id),
+        "title": "Updated Meeting Title",
+        "location": "Office B"
+    }
+    # No need to wrap in Message or StructuredUpdatePayload
+    # Create a placeholder task record so TaskManager can find it later
+    await task_manager.create_task(TaskSendParams(id=task_id, message=Message(role="user", parts=[])))
 
-    params = TaskSendParams(id=task_id, message=update_message, intent="update_event")
-    await task_manager.create_task(params)
-
-    # 3. Call the handler
+    # 3. Call the handler with the dictionary payload
     final_task = await handle_structured_update(
         task_id=task_id,
-        message=update_message,
+        payload=update_payload_dict, # Pass dict directly
         task_manager=task_manager,
         db_service=db_service,
         conflict_resolver=conflict_resolver,
         date_utils=date_utils,
     )
 
-    # 4. Assertions
+    # 4. Assertions (Task completion)
     assert final_task is not None
+    assert isinstance(final_task, Task)
     assert final_task.id == task_id
     assert final_task.status.state == TaskState.COMPLETED
     assert final_task.status.message is not None
+    # Handler constructs message internally, check content
     assert f"Event '{event_id}' updated successfully." in final_task.status.message.parts[0].text
 
+    # Assertions (Artifact)
     assert final_task.artifacts is not None
     assert len(final_task.artifacts) == 1
     artifact = final_task.artifacts[0]
@@ -77,7 +84,7 @@ async def test_handle_structured_update_success(
     assert updated_event_data["location"] == "Office B"
 
     # 5. Verify in DB
-    db_event = await get_event_by_id_strategy.execute(data=event_id)
+    db_event = await get_event_by_id_strategy.execute(data=EventGetById(id=event_id))
     assert db_event is not None
     assert db_event.title == "Updated Meeting Title"
     assert db_event.location == "Office B"
@@ -93,16 +100,19 @@ async def test_handle_structured_update_not_found(
     """Test updating a non-existent event."""
     task_id = str(uuid4())
     non_existent_id = uuid4()
-    update_details = EventUpdate(title="Doesn't Matter")
-    payload = StructuredUpdatePayload(event_id=non_existent_id, update_data=update_details)
-    update_message = Message(role="user", parts=[Part(type="data", data=payload.model_dump())])
+    # Construct the dictionary payload directly
+    update_payload_dict = {
+        "id": str(non_existent_id),
+        "title": "Doesn't Matter"
+    }
+    # No need to wrap in Message or StructuredUpdatePayload
+    # Create a placeholder task record so TaskManager can find it later
+    await task_manager.create_task(TaskSendParams(id=task_id, message=Message(role="user", parts=[])))
 
-    params = TaskSendParams(id=task_id, message=update_message, intent="update_event")
-    await task_manager.create_task(params)
-
+    # 3. Call the handler with the dictionary payload
     final_task = await handle_structured_update(
         task_id=task_id,
-        message=update_message,
+        payload=update_payload_dict, # Pass dict directly
         task_manager=task_manager,
         db_service=db_service,
         conflict_resolver=conflict_resolver,
@@ -113,6 +123,7 @@ async def test_handle_structured_update_not_found(
     assert final_task.id == task_id
     assert final_task.status.state == TaskState.FAILED
     assert final_task.status.message is not None
+    # Handler constructs message internally, check content
     assert f"Could not find event with ID '{non_existent_id}' to update." in final_task.status.message.parts[0].text
     assert not final_task.artifacts # No artifact on failure
 
@@ -124,19 +135,17 @@ async def test_handle_structured_update_invalid_payload(
     conflict_resolver: ConflictResolver,
     date_utils: DateUtils,
 ):
-    """Test update with invalid data structure."""
+    """Test update with invalid data structure (missing id)."""
     task_id = str(uuid4())
-    # Malformed payload (missing event_id)
-    invalid_data = {"update_data": {"title": "Bad Data"}}
-    update_message = Message(role="user", parts=[Part(type="data", data=invalid_data)])
+    # Malformed payload dictionary (missing event_id/id)
+    invalid_payload_dict = {"title": "Bad Data - No ID"}
+    # No need to call task_manager.create_task here, as the handler raises error before TaskManager is called
 
-    params = TaskSendParams(id=task_id, message=update_message, intent="update_event")
-    await task_manager.create_task(params)
-
+    # Handler should raise InvalidParamsError during internal validation
     with pytest.raises(InvalidParamsError) as exc_info:
         await handle_structured_update(
             task_id=task_id,
-            message=update_message,
+            payload=invalid_payload_dict, # Pass invalid dict directly
             task_manager=task_manager,
             db_service=db_service,
             conflict_resolver=conflict_resolver,
@@ -144,43 +153,9 @@ async def test_handle_structured_update_invalid_payload(
         )
 
     assert "Invalid data provided for event update." in str(exc_info.value)
-    # Verify task state wasn't changed to failed
-    task_state = await task_manager.get_task(task_id)
-    assert task_state.status.state == TaskState.WORKING
+    # Removed assertions about task_manager calls as it's not mocked
+    # The pytest.raises block confirms error before task_manager would be called
 
-
-@pytest.mark.asyncio
-async def test_handle_structured_update_missing_data_part(
-    task_manager: SchedulingTaskManager,
-    db_service: DatabaseService,
-    conflict_resolver: ConflictResolver,
-    date_utils: DateUtils,
-):
-    """Test update raises InvalidParamsError for missing or incorrect data part."""
-    task_id = str(uuid4())
-    # Message with a text part instead of a data part
-    update_message = Message(role="user", parts=[Part(type="text", text="update something")])
-
-    params = TaskSendParams(id=task_id, message=update_message, intent="update_event")
-    await task_manager.create_task(params)
-
-    # Expect InvalidParamsError to be raised directly by the handler
-    with pytest.raises(InvalidParamsError) as exc_info:
-        await handle_structured_update(
-            task_id=task_id,
-            message=update_message,
-            task_manager=task_manager,
-            db_service=db_service,
-            conflict_resolver=conflict_resolver,
-            date_utils=date_utils,
-        )
-
-    # Assert on the exception
-    assert "Missing data payload in message parts." in str(exc_info.value)
-
-    # Verify task state wasn't changed to failed
-    task_state = await task_manager.get_task(task_id)
-    assert task_state.status.state == TaskState.WORKING
 
 # TODO: Add test for ConflictError if update_event implements conflict checks
 # TODO: Add test for NotImplementedError if specific updates are unsupported

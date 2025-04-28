@@ -49,7 +49,7 @@ async def test_handle_structured_export_success_ics(
     # 3. Call the handler
     final_task = await handle_structured_export(
         task_id=task_id,
-        message=export_message,
+        payload=export_data,
         task_manager=task_manager,
         db_service=db_service,
         exporters=exporters,
@@ -99,7 +99,7 @@ async def test_handle_structured_export_no_events(
 
     final_task = await handle_structured_export(
         task_id=task_id,
-        message=export_message,
+        payload=export_data,
         task_manager=task_manager,
         db_service=db_service,
         exporters=exporters,
@@ -135,7 +135,7 @@ async def test_handle_structured_export_unsupported_format(
     with pytest.raises(InvalidParamsError) as exc_info:
         await handle_structured_export(
             task_id=task_id,
-            message=export_message,
+            payload=export_data,
             task_manager=task_manager,
             db_service=db_service,
             exporters=exporters,

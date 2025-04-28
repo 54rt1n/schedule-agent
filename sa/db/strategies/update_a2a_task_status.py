@@ -1,52 +1,46 @@
 # sa/db/strategies/update_a2a_task_status.py
-"""Strategy to update the status and history of an A2A task."""
+"""Strategy to update the status and potentially history of an A2A task."""
 
-from datetime import UTC, datetime
-import json
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
-from typing import Tuple
 
 from sa.core.logging_config import get_logger
 from sa.core.exceptions import TaskNotFoundError as CoreTaskNotFoundError
 from sa.db.models import A2ATask
 from sa.db.service import DatabaseService
 from sa.db.strategies.base import DatabaseExecutionStrategy
-from sa.db.dao import TaskStatus
+from sa.db.dao import UpdateA2ATaskStatus
 
 logger = get_logger(__name__)
 
 
-# Type alias for input data
-UpdateStatusInput = Tuple[str, TaskStatus]
-
-class UpdateA2ATaskStatusStrategy(DatabaseExecutionStrategy[UpdateStatusInput, None]):
-    """Strategy to update the status and history of an A2A task."""
+class UpdateA2ATaskStatusStrategy(DatabaseExecutionStrategy[UpdateA2ATaskStatus, None]):
+    """Strategy to update the status fields and optionally history of an A2ATask."""
 
     def __init__(self, db_service: DatabaseService):
         super().__init__(db_service=db_service)
 
-    async def _run(self, session: AsyncSession, data: UpdateStatusInput) -> None:
+    async def _run(self, session: AsyncSession, data: UpdateA2ATaskStatus) -> None:
         """
-        Fetches the task, updates its status fields, and adds to history.
+        Fetches the task, updates its status fields based on the DAO.
+        If new_history_json is provided in the DAO, updates the history field.
+        Relies on the DB model's onupdate trigger for updated_at.
 
         Args:
             session: The database session.
-            data: A tuple containing (task_id, new_status).
+            data: UpdateA2ATaskStatus DAO containing task_id and new status/history info.
 
         Raises:
-            TaskNotFoundError: If the task with the given ID is not found.
-            json.JSONDecodeError: If history JSON is invalid.
+            CoreTaskNotFoundError: If the task with the given ID is not found.
             Exception: For other database errors.
         """
-        task_id, new_status = data
-        logger.debug(f"Executing UpdateA2ATaskStatusStrategy for ID: {task_id}, New State: {new_status.state}")
+        task_id = data.id
+        logger.debug(f"Executing UpdateA2ATaskStatusStrategy for ID: {task_id}, New State: {data.new_state}")
 
         # 1. Fetch the task
-        # Use select for clarity, could use session.get as well
         stmt = select(A2ATask).where(A2ATask.id == task_id)
         result = await session.execute(stmt)
-        task = result.scalar_one_or_none()
+        task : A2ATask | None = result.scalar_one_or_none()
 
         if not task:
             logger.warning(f"A2A task with ID {task_id} not found for status update.")
@@ -54,29 +48,21 @@ class UpdateA2ATaskStatusStrategy(DatabaseExecutionStrategy[UpdateStatusInput, N
 
         logger.debug(f"Found task {task_id} for status update.")
 
-        # 2. Update task fields
-        task.state = new_status.state.value # Store enum value
-        task.status_message_json = new_status.message.model_dump_json() if new_status.message else None
-        task.updated_at = datetime.now(UTC).replace(tzinfo=None) # Update timestamp
+        # 2. Update task fields from DAO
+        task.state = data.new_state
+        task.status_message_json = data.new_status_message_json
+        task.status_timestamp = data.new_status_timestamp
+        # Only update history if the manager provided a new serialized list
+        if data.new_history_json is not None:
+            task.history_json = data.new_history_json
+            logger.debug(f"Updating history for task {task_id}.")
 
-        # 3. Update history
-        try:
-            history = json.loads(task.history_json) if task.history_json else []
-            # Append the new status (as a dict/JSON representation)
-            history.append(new_status.model_dump())
-            task.history_json = json.dumps(history)
-            logger.debug(f"Updated history for task {task_id}. New length: {len(history)}")
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to decode history JSON for task {task_id}: {task.history_json}", exc_info=True)
-            raise # Re-raise to be caught by the base class
-        except Exception as e:
-            logger.error(f"Error updating history for task {task_id}", exc_info=True)
-            raise # Re-raise other errors
+        # Note: task.updated_at is handled by the DB model's onupdate mechanism.
 
-        # 4. Add to session (session.merge might also work here if task was detached)
+        # 3. Add to session (marks the object as dirty)
         session.add(task)
         await session.flush() # Ensure changes are flushed before potential commit
-        logger.debug(f"Task {task_id} status updated and flushed.")
+        logger.debug(f"Task {task_id} status/history updated and flushed.")
 
         # No return value needed
 

@@ -4,11 +4,10 @@ from typing import Dict, Any
 
 from sa.core.logging_config import get_logger
 from sa.db.models import Event
-from sa.db.dao import EventCreate
+from sa.db.dao import EventCreate, TimeRange
 from sa.db.service import DatabaseService
 from sa.event.date_utils import DateUtils
 from sa.db.strategies.get_events_in_range import GetEventsInRangeStrategy
-from sa.db.dao import TimeRange
 
 logger = get_logger(__name__)
 
@@ -92,7 +91,7 @@ async def test_get_events_in_range_simple(
         db_service=db_service,
         date_utils=date_utils
     )
-    strategy_input: TimeRange = (range_start_aware, range_end_aware)
+    strategy_input = TimeRange(start_time=range_start_aware, end_time=range_end_aware)
 
     # --- Act ---
     # Execute the strategy
@@ -118,7 +117,7 @@ async def test_get_events_in_range_empty(
         db_service=db_service,
         date_utils=date_utils
     )
-    strategy_input = (range_start_aware, range_end_aware)
+    strategy_input = TimeRange(start_time=range_start_aware, end_time=range_end_aware)
 
     # --- Act ---
     retrieved_events = await strategy.execute(data=strategy_input)
@@ -206,7 +205,7 @@ async def test_get_events_in_range_simple_boundaries(
         db_service=db_service,
         date_utils=date_utils
     )
-    strategy_input: TimeRange = (QUERY_RANGE_START, QUERY_RANGE_END)
+    strategy_input = TimeRange(start_time=QUERY_RANGE_START, end_time=QUERY_RANGE_END)
 
     # --- Act ---
     retrieved_events = await strategy.execute(data=strategy_input)

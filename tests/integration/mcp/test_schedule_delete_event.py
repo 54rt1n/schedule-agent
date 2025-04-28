@@ -8,7 +8,7 @@ from sa.event.date_utils import DateUtils
 from sa.event.conflict_resolver import ConflictResolver
 from sa.db.models import Event
 from sa.db.service import DatabaseService
-from sa.db.dao import EventCreate
+from sa.db.dao import EventCreate, EventDelete, EventGetById
 from sa.mcp.handlers import schedule_delete_event
 from sa.db.strategies.create_event import CreateEventStrategy
 from sa.db.strategies.get_event_by_id import GetEventByIdStrategy
@@ -46,29 +46,26 @@ async def test_schedule_delete_event_success(
     mcp_test_db_service: DatabaseService,
 ):
     """Test successful deletion of an existing event."""
-    event_id_to_delete = str(event_to_delete.id)
-    event_id_uuid = event_to_delete.id
-
     # Instantiate strategy for assertions
     get_event_strategy = GetEventByIdStrategy(db_service=mcp_test_db_service)
 
     # Pre-check: Ensure event exists using the strategy
-    db_event = await get_event_strategy.execute(data=event_id_uuid)
+    db_event = await get_event_strategy.execute(data=EventGetById(id=event_to_delete.id))
     assert db_event is not None
 
     # Action
     result = await schedule_delete_event(
-        event_id=event_id_to_delete,
-        db_service=mcp_test_db_service
+        db_service=mcp_test_db_service,
+        event_id=event_to_delete.id,
     )
 
     # Assert Handler Response
     assert result is not None
     assert result.get("success") is True
-    assert result.get("event_id") == event_id_to_delete
+    assert result.get("event_id") == event_to_delete.id
 
     # Assert Database State using the strategy
-    db_event_after_delete = await get_event_strategy.execute(data=event_id_uuid)
+    db_event_after_delete = await get_event_strategy.execute(data=EventGetById(id=event_to_delete.id))
     assert db_event_after_delete is None
 
 
@@ -81,8 +78,8 @@ async def test_schedule_delete_event_not_found(
 
     # Action
     result = await schedule_delete_event(
+        db_service=mcp_test_db_service,
         event_id=non_existent_event_id,
-        db_service=mcp_test_db_service
     )
 
     # Assert Handler Response (failure expected)

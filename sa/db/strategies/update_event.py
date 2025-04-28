@@ -20,7 +20,7 @@ from sa.event.date_utils import DateUtils
 
 logger = get_logger(__name__)
 
-class UpdateEventStrategy(DatabaseExecutionStrategy[tuple[uuid.UUID, EventUpdate], Optional[EventResponse]]):
+class UpdateEventStrategy(DatabaseExecutionStrategy[EventUpdate, Optional[EventResponse]]):
     """
     Strategy for updating an existing event or a recurring instance using explicit UPDATE statements.
     """
@@ -54,7 +54,8 @@ class UpdateEventStrategy(DatabaseExecutionStrategy[tuple[uuid.UUID, EventUpdate
             NotImplementedError: For unsupported updates (e.g., series time change).
             ConflictError: If a conflict is detected during update (currently disabled).
         """
-        event_id, update_data = data
+        event_id = data.id
+        update_data = data
         logger.info(f"Executing UpdateEventStrategy (dict method) for ID: {event_id}")
 
         # --- Common: Retrieve the existing event first ---
@@ -157,6 +158,8 @@ class UpdateEventStrategy(DatabaseExecutionStrategy[tuple[uuid.UUID, EventUpdate
 
         # Add updated_at timestamp
         values_to_update["updated_at"] = datetime.now(UTC).replace(tzinfo=None)
+        if 'id' in values_to_update:
+            values_to_update.pop('id')
 
         logger.debug(f"Executing DB UPDATE for event {event_id} with values: {values_to_update}")
         stmt_update = (

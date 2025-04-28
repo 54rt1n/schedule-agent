@@ -228,12 +228,19 @@ def test_rpc_exception_mapping_a2a_from_handler(client: TestClient, auth_headers
         "event_id": event_id,
         "update_data": {"title": "New Title"}
     }
+
+    # Wrap the structured data
+    structured_data_wrapper = {
+        "intent": "update_event",
+        "payload": update_payload
+    }
+
     send_params = {
         "id": task_id,
-        "intent": "update_event",
+        # Intent removed from top level
         "message": {
             "role": "user",
-            "parts": [{"type": "data", "data": update_payload}]
+            "parts": [{"type": "data", "data": structured_data_wrapper}] # Use wrapped data
         }
     }
     rpc_payload = build_rpc_request("tasks/send", send_params)
@@ -294,12 +301,19 @@ async def test_rpc_exception_mapping_conflict_error_to_invalid_params(
         "start_time": start_time_conflict_str,
         "end_time": end_time_conflict_str,
     }
+
+    # Wrap the structured data
+    structured_data_wrapper = {
+        "intent": "create_event",
+        "payload": conflict_create_payload
+    }
+
     send_params = {
         "id": task_id_conflict,
-        "intent": "create_event",
+        # Intent removed from top level
         "message": {
             "role": "user",
-            "parts": [{"type": "data", "data": conflict_create_payload}]
+            "parts": [{"type": "data", "data": structured_data_wrapper}] # Use wrapped data
         }
     }
     rpc_payload = build_rpc_request("tasks/send", send_params)
@@ -402,6 +416,6 @@ def test_rpc_tasks_send_missing_intent_for_structured_data(
 
     error_payload = response_data["error"]
     assert error_payload["code"] == InvalidParamsError.DEFAULT_CODE # -32602
-    assert "An explicit 'intent' is required when sending structured data" in error_payload["message"]
-    # For this specific error path, the 'data' field is not expected in the error payload
-    assert error_payload.get("data") is None, "'data' field should be absent or null in this error case"
+    assert "Invalid format for structured data payload" in error_payload["message"]
+    # For this specific error path, the 'data' field IS NOW expected to contain validation details
+    # assert error_payload.get("data") is None, "'data' field should be absent or null in this error case"

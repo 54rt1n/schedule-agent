@@ -8,7 +8,7 @@ from sa.db.strategies.create_event import CreateEventStrategy # Needed for setup
 from sa.db.strategies.get_event_by_id import GetEventByIdStrategy # Needed for verification
 from sa.event.date_utils import DateUtils # Dependency of UpdateEventStrategy
 from sa.event.conflict_resolver import ConflictResolver # Dependency of UpdateEventStrategy
-from sa.db.dao import EventCreate, EventUpdate
+from sa.db.dao import EventCreate, EventUpdate, EventGetById
 from sa.db.models import Event
 
 
@@ -38,8 +38,8 @@ async def test_update_event_simple(
         date_utils=date_utils,
         conflict_resolver=conflict_resolver
     )
-    update_payload = EventUpdate(title=new_title)
-    strategy_input = (event_id, update_payload)
+    # Construct the complete EventUpdate DAO including the ID
+    strategy_input = EventUpdate(id=event_id, title=new_title)
 
     # --- Act ---
     # The strategy returns the updated Event or ModifiedInstance
@@ -51,6 +51,6 @@ async def test_update_event_simple(
     assert updated_event_result.title == new_title
 
     # Verify the change in the database
-    verified_event = await get_event_by_id_strategy.execute(data=event_id)
+    verified_event = await get_event_by_id_strategy.execute(data=EventGetById(id=event_id))
     assert verified_event is not None
     assert verified_event.title == new_title

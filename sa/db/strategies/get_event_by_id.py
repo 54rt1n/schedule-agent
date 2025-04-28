@@ -11,18 +11,18 @@ from sa.core.logging_config import get_logger
 from sa.db.models import Event, ModifiedInstance
 from sa.db.service import DatabaseService
 from sa.db.strategies.base import DatabaseExecutionStrategy
-from sa.db.dao import EventResponse
+from sa.db.dao import EventResponse, EventGetById
 
 logger = get_logger(__name__)
 
 
-class GetEventByIdStrategy(DatabaseExecutionStrategy[uuid.UUID, Optional[EventResponse]]):
+class GetEventByIdStrategy(DatabaseExecutionStrategy[EventGetById, Optional[EventResponse]]):
     """Strategy to retrieve a single event by its ID, including relationships."""
 
     def __init__(self, db_service: DatabaseService):
         super().__init__(db_service=db_service)
 
-    async def _run(self, session: AsyncSession, data: uuid.UUID) -> Optional[EventResponse]:
+    async def _run(self, session: AsyncSession, data: EventGetById) -> Optional[EventResponse]:
         """
         Fetches the event by ID within the transaction managed by the base class.
 
@@ -33,7 +33,7 @@ class GetEventByIdStrategy(DatabaseExecutionStrategy[uuid.UUID, Optional[EventRe
         Returns:
             The Event object if found, otherwise None.
         """
-        event_id = data # Assign data to the specific variable name
+        event_id = data.id
         logger.debug(f"Executing GetEventByIdStrategy for ID: {event_id}")
         result = await session.execute(
             select(Event)
