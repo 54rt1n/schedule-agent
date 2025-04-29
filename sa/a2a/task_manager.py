@@ -1,4 +1,6 @@
 # sa/a2a/task_manager.py
+# Copyright (C) 2025 Martin Bukowski
+
 """Manages the lifecycle and persistence of A2A tasks according to the spec.
 
 **Ideal Implementation Goal:**
@@ -198,14 +200,14 @@ class SchedulingTaskManager:
         logger.info(f"Creating new task: {task_id}", session_id=params.sessionId)
 
         # 1. Define initial state
-        initial_state = TaskState.WORKING # Or potentially SUBMITTED depending on flow
+        initial_state = TaskState.WORKING
         initial_timestamp = datetime.now(UTC)
         initial_status = TaskStatus(
             state=initial_state,
             timestamp=initial_timestamp,
-            message=None # Initial status usually doesn't have a message
+            message=None
         )
-        initial_history = [params.message] # History starts with the input message
+        initial_history = [params.message]
 
         # 2. Prepare DAO for persistence
         try:
@@ -213,9 +215,9 @@ class SchedulingTaskManager:
                 id=task_id,
                 session_id=params.sessionId,
                 state=initial_state.value,
-                status_message_json=None,
-                status_timestamp=initial_timestamp.replace(tzinfo=None), # Store naive UTC
-                artifacts_json="[]", # Start with empty artifacts
+                status_message_json=initial_status.message.model_dump_json() if initial_status.message else None,
+                status_timestamp=initial_timestamp.replace(tzinfo=None),
+                artifacts_json="[]",
                 history_json=json.dumps([msg.model_dump() for msg in initial_history]),
                 metadata_json=json.dumps(params.metadata) if params.metadata else None
             )

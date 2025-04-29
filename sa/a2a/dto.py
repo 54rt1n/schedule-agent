@@ -1,4 +1,6 @@
 # sa/a2a/dto.py
+# Copyright (C) 2025 Martin Bukowski
+
 """Pydantic models for the Agent-to-Agent (A2A) Communication Protocol.
 
 This module defines the data transfer objects (DTOs) used for communication

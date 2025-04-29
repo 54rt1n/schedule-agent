@@ -1,11 +1,8 @@
 # sa/db/migrations/b2b10e0a2510_add_a2a_task_table.py
-"""Add a2a_task table
+# Copyright (C) 2025 Martin Bukowski
 
-Revision ID: b2b10e0a2510
-Revises: 68550a046b57
-Create Date: 2025-04-20 19:50:02.015502
+"""Add a2a_task table."""
 
-"""
 from typing import Sequence, Union
 
 from alembic import op

@@ -13,6 +13,11 @@ from sa.db.strategies.get_event_by_id import GetEventByIdStrategy
 from sa.db.strategies.save_a2a_task import SaveA2ATaskStrategy
 from sa.db.strategies.get_a2a_task_by_id import GetA2ATaskByIdStrategy
 from sa.db.strategies.update_a2a_task_status import UpdateA2ATaskStatusStrategy
+from sa.db.strategies.contact_create import CreateContactStrategy
+from sa.db.strategies.contact_find import FindContactsStrategy
+from sa.db.strategies.contact_get_by_id import GetContactByIdStrategy
+from sa.db.strategies.contact_update import UpdateContactStrategy
+from sa.db.strategies.contact_delete import DeleteContactStrategy
 
 # Generic Sample Event Data (adjust if tests need more specific versions)
 @pytest.fixture
@@ -63,3 +68,29 @@ def update_a2a_task_status_strategy(db_service: DatabaseService) -> UpdateA2ATas
 def get_events_in_range_strategy(db_service: DatabaseService, date_utils: DateUtils) -> GetEventsInRangeStrategy:
     """Provides an instance of the GetEventsInRangeStrategy."""
     return GetEventsInRangeStrategy(db_service=db_service, date_utils=date_utils) 
+
+# Contact Strategy Fixtures
+@pytest.fixture
+def create_contact_strategy(db_service: DatabaseService) -> CreateContactStrategy:
+    """Provides an instance of CreateContactStrategy."""
+    return CreateContactStrategy(db_service=db_service)
+
+@pytest.fixture
+def find_contacts_strategy(db_service: DatabaseService) -> FindContactsStrategy:
+    """Provides an instance of FindContactsStrategy."""
+    return FindContactsStrategy(db_service=db_service)
+
+@pytest.fixture
+def get_contact_by_id_strategy(db_service: DatabaseService) -> GetContactByIdStrategy:
+    """Provides an instance of GetContactByIdStrategy."""
+    return GetContactByIdStrategy(db_service=db_service)
+
+@pytest.fixture
+def update_contact_strategy(db_service: DatabaseService) -> UpdateContactStrategy:
+    """Provides an instance of UpdateContactStrategy."""
+    return UpdateContactStrategy(db_service=db_service)
+
+@pytest.fixture
+def delete_contact_strategy(db_service: DatabaseService) -> DeleteContactStrategy:
+    """Provides an instance of DeleteContactStrategy."""
+    return DeleteContactStrategy(db_service=db_service) 

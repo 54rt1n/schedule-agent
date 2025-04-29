@@ -1,4 +1,6 @@
 # sa/a2a/command/structured_delete.py
+# Copyright (C) 2025 Martin Bukowski
+
 """Handles the logic path for structured data input (delete event ONLY)."""
 
 from pydantic import ValidationError

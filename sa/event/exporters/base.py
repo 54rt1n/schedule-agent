@@ -1,4 +1,6 @@
 # sa/event/exporters/base.py
+# Copyright (C) 2025 Martin Bukowski
+
 """Base class for calendar exporters."""
 
 from typing import Any, Protocol

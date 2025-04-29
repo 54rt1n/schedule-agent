@@ -1,7 +1,10 @@
 # sa/core/exceptions.py
+# Copyright (C) 2025 Martin Bukowski
+
 """Core exceptions for the scheduling agent."""
 
 from typing import Any
+import uuid
 
 
 class CoreLogicError(Exception):
@@ -28,6 +31,7 @@ class DatabaseError(Exception):
     def __init__(self, message: str, data: Any | None = None):
         self.message = message
         self.data = data
+        super().__init__(self.message)
 
 
 class ConflictError(CoreLogicError):
@@ -56,3 +60,17 @@ class TaskNotFoundError(DatabaseError):
     def __init__(self, task_id: str):
         self.task_id = task_id
         super().__init__(f"Task with ID '{task_id}' not found.")
+
+
+class ContactNotFoundError(DatabaseError):
+    """Raised when a specific contact is not found."""
+
+    def __init__(self, contact_id: str | uuid.UUID):
+        self.contact_id = str(contact_id) # Ensure it's a string for the message
+        super().__init__(f"Contact with ID '{self.contact_id}' not found.")
+
+
+class InvalidInputError(CoreLogicError):
+    """Raised when user input is invalid (e.g., unparseable date)."""
+    def __init__(self, message: str, data: Any | None = None):
+        super().__init__(message, data)

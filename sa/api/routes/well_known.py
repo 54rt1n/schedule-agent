@@ -1,4 +1,6 @@
 # sa/api/routes/well_known.py
+# Copyright (C) 2025 Martin Bukowski
+
 """Handles the /.well-known/agent.json endpoint."""
 
 from fastapi import APIRouter, Depends

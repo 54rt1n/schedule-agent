@@ -1,4 +1,6 @@
 # sa/db/strategies/save_a2a_task.py
+# Copyright (C) 2025 Martin Bukowski
+
 """Strategy to save (create or update) an A2A task."""
 
 from sqlalchemy.ext.asyncio import AsyncSession

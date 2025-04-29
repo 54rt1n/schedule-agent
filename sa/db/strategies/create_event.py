@@ -1,4 +1,6 @@
 # sa/db/strategies/create_event.py
+# Copyright (C) 2025 Martin Bukowski
+
 """Strategy for creating event records in the database."""
 
 from sqlalchemy import select

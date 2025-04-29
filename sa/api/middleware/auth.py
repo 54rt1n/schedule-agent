@@ -1,4 +1,6 @@
 # sa/api/middleware/auth.py
+# Copyright (C) 2025 Martin Bukowski
+
 """Middleware for API key authentication."""
 
 from fastapi import Request, status

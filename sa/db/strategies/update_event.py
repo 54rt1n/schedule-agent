@@ -1,4 +1,6 @@
 # sa/db/strategies/update_event.py
+# Copyright (C) 2025 Martin Bukowski
+
 """Strategy for updating an existing event or a recurring instance."""
 
 import uuid

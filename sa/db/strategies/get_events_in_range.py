@@ -1,4 +1,6 @@
 # sa/db/strategies/get_events_in_range.py
+# Copyright (C) 2025 Martin Bukowski
+
 """Strategy to retrieve event instances overlapping a given time range."""
 
 from datetime import UTC

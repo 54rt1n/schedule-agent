@@ -1,4 +1,6 @@
 # sa/db/service.py
+# Copyright (C) 2025 Martin Bukowski
+
 """Database service for the scheduling agent."""
 
 from collections.abc import AsyncGenerator

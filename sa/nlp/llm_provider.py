@@ -1,4 +1,6 @@
 # sa/nlp/llm_provider.py
+# Copyright (C) 2025 Martin Bukowski
+
 """Provides an interface to interact with Language Models (LLMs)."""
 
 import json

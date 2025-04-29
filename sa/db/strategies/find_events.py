@@ -1,4 +1,6 @@
 # sa/db/strategies/find_events.py
+# Copyright (C) 2025 Martin Bukowski
+
 """Strategy to find events based on query criteria."""
 
 from sqlalchemy import func

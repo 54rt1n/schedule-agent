@@ -1,4 +1,6 @@
 # sa/db/strategies/update_a2a_task_status.py
+# Copyright (C) 2025 Martin Bukowski
+
 """Strategy to update the status and potentially history of an A2A task."""
 
 from sqlalchemy.ext.asyncio import AsyncSession

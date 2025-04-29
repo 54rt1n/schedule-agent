@@ -1,4 +1,6 @@
 # sa/db/strategies/get_a2a_task_by_id.py
+# Copyright (C) 2025 Martin Bukowski
+
 """Strategy to retrieve a single A2A task by its ID."""
 
 from typing import Optional

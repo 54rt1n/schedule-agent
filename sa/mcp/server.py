@@ -1,4 +1,6 @@
 # sa/mcp/server.py
+# Copyright (C) 2025 Martin Bukowski
+
 """Server for the Scheduling Agent MCP."""
 
 from contextlib import asynccontextmanager

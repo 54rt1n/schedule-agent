@@ -1,4 +1,6 @@
 # sa/db/strategies/delete_event.py
+# Copyright (C) 2025 Martin Bukowski
+
 """Strategy to delete an event by its ID."""
 
 import uuid

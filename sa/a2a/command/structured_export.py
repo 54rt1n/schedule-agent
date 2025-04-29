@@ -1,4 +1,6 @@
 # sa/a2a/command/structured_export.py
+# Copyright (C) 2025 Martin Bukowski
+
 """Handles the export_calendar intent."""
 
 import base64

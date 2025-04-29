@@ -1,4 +1,6 @@
 # sa/event/exporters/ical_exporter.py
+# Copyright (C) 2025 Martin Bukowski
+
 """iCalendar (.ics) exporter for events."""
 
 from datetime import UTC, datetime

@@ -1,4 +1,6 @@
 # sa/event/date_utils.py
+# Copyright (C) 2025 Martin Bukowski
+
 """Date and time utility functions."""
 
 import dateparser
@@ -11,6 +13,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sa.core.logging_config import get_logger
 from sa.db.models import ExcludedDate, ModifiedInstance
+from sa.core.exceptions import InvalidInputError
 
 logger = get_logger(__name__)
 
@@ -146,7 +149,7 @@ class DateUtils:
         start_date_str: str | None,
         end_date_str: str | None,
         default_start: str = "today",
-        default_end: str = "next Sunday",
+        default_end: str = "in 7 days",
     ) -> tuple[datetime, datetime]:
         """Parses start/end date strings (often from NLP) into an aware UTC date range.
 
@@ -172,7 +175,7 @@ class DateUtils:
 
         try:
             # Parse start date string using dateparser
-            start_dt = dateparser.parse(start_str_to_parse, settings=parser_settings)
+            start_dt = dateparser.parse(start_str_to_parse, settings=parser_settings, languages=['en'])
             if start_dt:
                 # Set time to beginning of the day
                 start_dt = start_dt.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -180,29 +183,26 @@ class DateUtils:
                 range_start_utc = self.normalize_to_utc(start_dt)
 
             # Parse end date string using dateparser
-            end_dt = dateparser.parse(end_str_to_parse, settings=parser_settings)
+            end_dt = dateparser.parse(end_str_to_parse, settings=parser_settings, languages=['en'])
             if end_dt:
                 # Set time to end of the day
                 end_dt = end_dt.replace(hour=23, minute=59, second=59, microsecond=999999)
                 # Ensure it's aware UTC
                 range_end_utc = self.normalize_to_utc(end_dt)
 
-            # Handle parsing failures with defaults
+            # Handle parsing failures - RAISE InvalidInputError
             if range_start_utc is None:
                 logger.warning(
-                    f"Failed to parse start date '{start_str_to_parse}', defaulting to today."
+                    f"Failed to parse start date '{start_str_to_parse}', raising error."
                 )
-                range_start_utc = self.normalize_to_utc(
-                    datetime.combine(datetime.now(UTC).date(), time.min) # Aware UTC start of today
-                )
+                # RAISE CUSTOM ERROR INSTEAD OF DEFAULTING OR ValueError
+                raise InvalidInputError(f"Could not parse start date string: '{start_str_to_parse}'")
             if range_end_utc is None:
                 logger.warning(
-                    f"Failed to parse end date '{end_str_to_parse}', defaulting to 7 days from start."
+                    f"Failed to parse end date '{end_str_to_parse}', raising error."
                 )
-                # Default end is 7 days from the *determined* start date
-                range_end_utc = range_start_utc + timedelta(days=7)
-                # Ensure end time is end of day
-                range_end_utc = range_end_utc.replace(hour=23, minute=59, second=59, microsecond=999999)
+                # RAISE CUSTOM ERROR INSTEAD OF DEFAULTING OR ValueError
+                raise InvalidInputError(f"Could not parse end date string: '{end_str_to_parse}'")
 
             # Ensure start is before end
             if range_start_utc >= range_end_utc:
@@ -212,17 +212,14 @@ class DateUtils:
                 range_end_utc = range_start_utc + timedelta(days=7)
                 range_end_utc = range_end_utc.replace(hour=23, minute=59, second=59, microsecond=999999)
 
+        except InvalidInputError as iie:
+            logger.warning(f"Caught InvalidInputError during date range parsing: {iie}")
+            raise iie
         except Exception as parse_err:
-            # Fallback completely if any unexpected error occurs during parsing
             logger.exception(
-                f"Unexpected error parsing date range ('{start_str_to_parse}' - '{end_str_to_parse}'), defaulting to next 7 days.",
-                error=parse_err,
+                f"Unexpected error parsing date range ('{start_str_to_parse}' - '{end_str_to_parse}').",
             )
-            range_start_utc = self.normalize_to_utc(
-                 datetime.combine(datetime.now(UTC).date(), time.min)
-            )
-            range_end_utc = range_start_utc + timedelta(days=7)
-            range_end_utc = range_end_utc.replace(hour=23, minute=59, second=59, microsecond=999999)
+            raise parse_err
 
         return range_start_utc, range_end_utc
 

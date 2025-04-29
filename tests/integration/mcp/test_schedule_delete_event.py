@@ -53,16 +53,18 @@ async def test_schedule_delete_event_success(
     db_event = await get_event_strategy.execute(data=EventGetById(id=event_to_delete.id))
     assert db_event is not None
 
+    event_id_str = str(event_to_delete.id)
+
     # Action
     result = await schedule_delete_event(
         db_service=mcp_test_db_service,
-        event_id=event_to_delete.id,
+        event_id=event_id_str,
     )
 
     # Assert Handler Response
     assert result is not None
     assert result.get("success") is True
-    assert result.get("event_id") == event_to_delete.id
+    assert result.get("event_id") == event_id_str
 
     # Assert Database State using the strategy
     db_event_after_delete = await get_event_strategy.execute(data=EventGetById(id=event_to_delete.id))

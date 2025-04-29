@@ -22,12 +22,10 @@ def clear_env_vars(monkeypatch):
         "DEFAULT_TIMEZONE",
         "AGENT_VERSION",
         "LOG_LEVEL",
-        "DOTENV_PATH" # Pydantic-settings uses this
+        "DOTENV_PATH",
     ]
     for var in vars_to_clear:
         monkeypatch.delenv(var, raising=False)
-    # Removed: monkeypatch.setattr(Settings.model_config, 'env_file', None)
-    # We handle .env path specifically in tests that need it.
 
 
 def test_default_settings():
@@ -38,7 +36,7 @@ def test_default_settings():
 
     settings = TestSettings()
     assert settings.api_keys == []
-    assert settings.database_url == "sqlite+aiosqlite:///./schedule_agent.db"
+    assert settings.database_url == "sqlite+aiosqlite:///./local/schedule_agent.db"
     assert settings.llm_api_key is None
     assert settings.llm_base_url is None
     assert settings.llm_model == "gpt-4o-mini"

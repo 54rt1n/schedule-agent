@@ -1,4 +1,6 @@
 # sa/event/conflict_resolver.py
+# Copyright (C) 2025 Martin Bukowski
+
 """Conflict resolver for scheduling events."""
 
 from datetime import UTC, datetime, timedelta

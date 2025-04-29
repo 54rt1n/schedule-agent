@@ -8,9 +8,16 @@ version = "0.1.0"
 description = "Scheduling Agent for calendar management"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { file = "LICENSE" } # Will need to create LICENSE later
+license = { file = "LICENSE" }
 authors = [
   { name = "Martin Bukowski", email = "mbukowski@bmds.us" }
+]
+classifiers = [
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
   "mcp[cli]>=1.6.0",

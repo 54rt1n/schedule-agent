@@ -1,4 +1,6 @@
 # sa/db/models/event.py
+# Copyright (C) 2025 Martin Bukowski
+
 """Models for the Event."""
 
 from datetime import UTC, datetime
@@ -12,10 +14,8 @@ NaiveDateTime = Column(DateTime)
 class EventBase(SQLModel):
     """Base model for event data (shared properties)."""
     title: str = Field(index=True)
-    # Store naive datetimes, assumed to be UTC by application convention
     start_time: datetime = Field(sa_column=Column(DateTime, index=True, nullable=False))
     end_time: datetime = Field(sa_column=Column(DateTime, index=True, nullable=False))
-    # Store the IANA timezone identifier associated with the original event time
     time_zone: str = Field(default="UTC")
     location: str | None = Field(default=None)
     notes: str | None = Field(default=None)

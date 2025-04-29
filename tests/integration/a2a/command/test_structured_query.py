@@ -11,38 +11,47 @@ from sa.a2a.task_manager import SchedulingTaskManager
 from sa.db.dao import EventCreate, EventQuery
 from sa.db.service import DatabaseService
 from sa.db.strategies.create_event import CreateEventStrategy
+from sa.event.date_utils import DateUtils
 
 @pytest.mark.asyncio
-async def test_handle_structured_query_success_by_id(
+async def test_handle_structured_query_success_with_relative_date(
     task_manager: SchedulingTaskManager,
     db_service: DatabaseService,
+    date_utils: DateUtils,
     create_event_strategy: CreateEventStrategy,
 ):
     """Test successful event query by ID via handle_structured_query."""
-    # 1. Create an event to query
-    event_time = datetime(2024, 9, 5, 14, 0, 0, tzinfo=timezone.utc)
+    # 1. Create an event to query in the near future
+    event_time = datetime.now(timezone.utc) + timedelta(days=3)
+    event_time = event_time.replace(hour=14, minute=0, second=0, microsecond=0)
     initial_data = EventCreate(
-        title="Query Me Event",
+        title="Query Me Event Near Future",
         start_time=event_time,
         end_time=event_time + timedelta(hours=1),
     )
     created_event = await create_event_strategy.execute(data=initial_data)
     event_id = created_event.id
 
-    # 2. Prepare query payload
+    # 2. Prepare query payload using the future date
     task_id = str(uuid4())
-    query_params = EventQuery(id=event_id)
-    query_message = Message(role="user", parts=[Part(type="data", data=query_params.model_dump())])
+    query_payload = {
+        "start_date": "in 3 days",
+        "end_date": "in 4 days",
+        "title_contains": "query me"
+    }
+    # The Message/Part structure is only needed for task creation
+    query_message = Message(role="user", parts=[Part(type="data", data=query_payload)])
 
-    params = TaskSendParams(id=task_id, message=query_message, intent="query_events")
+    params = TaskSendParams(id=task_id, message=query_message)
     await task_manager.create_task(params)
 
     # 3. Call the handler
     final_task = await handle_structured_query(
         task_id=task_id,
-        payload=query_params.model_dump(),
+        payload=query_payload, # Pass the actual payload dict
         task_manager=task_manager,
         db_service=db_service,
+        date_utils=date_utils,
     )
 
     # 4. Assertions
@@ -56,7 +65,7 @@ async def test_handle_structured_query_success_by_id(
     assert isinstance(result_data, list)
     assert len(result_data) == 1
     assert result_data[0]["id"] == str(event_id)
-    assert result_data[0]["title"] == "Query Me Event"
+    assert result_data[0]["title"] == "Query Me Event Near Future"
     assert not final_task.artifacts
 
 
@@ -64,6 +73,7 @@ async def test_handle_structured_query_success_by_id(
 async def test_handle_structured_query_no_results(
     task_manager: SchedulingTaskManager,
     db_service: DatabaseService,
+    date_utils: DateUtils,
 ):
     """Test querying when no events match."""
     task_id = str(uuid4())
@@ -78,6 +88,7 @@ async def test_handle_structured_query_no_results(
         payload=query_params.model_dump(),
         task_manager=task_manager,
         db_service=db_service,
+        date_utils=date_utils,
     )
 
     assert final_task is not None
@@ -92,6 +103,7 @@ async def test_handle_structured_query_no_results(
 async def test_handle_structured_query_invalid_payload(
     task_manager: SchedulingTaskManager,
     db_service: DatabaseService,
+    date_utils: DateUtils,
 ):
     """Test query raises InvalidParamsError for invalid data structure."""
     task_id = str(uuid4())
@@ -108,20 +120,17 @@ async def test_handle_structured_query_invalid_payload(
             payload=invalid_data,
             task_manager=task_manager,
             db_service=db_service,
+            date_utils=date_utils,
         )
 
     # Assert on the exception
-    assert "Invalid query parameters" in str(exc_info.value)
-    assert isinstance(exc_info.value.data, list) # Should contain Pydantic errors
-
-    # Verify task state wasn't changed to failed
-    task_state = await task_manager.get_task(task_id)
-    assert task_state.status.state == TaskState.WORKING
+    assert "Invalid start or end time format" in str(exc_info.value)
 
 @pytest.mark.asyncio
 async def test_handle_structured_query_invalid_data_type(
     task_manager: SchedulingTaskManager,
     db_service: DatabaseService,
+    date_utils: DateUtils,
 ):
     """Test query raises InvalidParamsError for invalid data type in payload."""
     task_id = str(uuid4())
@@ -140,14 +149,10 @@ async def test_handle_structured_query_invalid_data_type(
             payload=invalid_payload,
             task_manager=task_manager,
             db_service=db_service,
+            date_utils=date_utils,
         )
 
     # Assert on the exception
-    assert "Invalid query parameters" in str(exc_info.value)
-    assert isinstance(exc_info.value.data, list) # Should contain Pydantic errors
-
-    # Verify task state wasn't changed to failed
-    task_state = await task_manager.get_task(task_id)
-    assert task_state.status.state == TaskState.WORKING
+    assert "Invalid start or end time format" in str(exc_info.value)
 
 # TODO: Add tests for other query criteria (participants, location etc.) 

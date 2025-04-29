@@ -1,4 +1,6 @@
 # sa/api/dependencies.py
+# Copyright (C) 2025 Martin Bukowski
+
 """Dependencies for the scheduling agent API."""
 
 from fastapi import Request

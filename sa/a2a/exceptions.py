@@ -1,4 +1,6 @@
 # sa/a2a/exceptions.py
+# Copyright (C) 2025 Martin Bukowski
+
 """Custom exceptions for the Agent-to-Agent (A2A) Communication Protocol.
 
 Based on the A2A specification (a2aspec)

@@ -1,4 +1,6 @@
 # sa/nlp/dao.py
+# Copyright (C) 2025 Martin Bukowski
+
 """Data Access Objects (DAOs) for the NLP module."""
 
 from pydantic import BaseModel, Field

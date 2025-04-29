@@ -1,4 +1,6 @@
 # sa/db/strategies/base.py
+# Copyright (C) 2025 Martin Bukowski
+
 """Base class for database execution strategies."""
 
 import abc

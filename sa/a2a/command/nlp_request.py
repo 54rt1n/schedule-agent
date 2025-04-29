@@ -1,4 +1,6 @@
 # sa/a2a/command/nlp_request.py
+# Copyright (C) 2025 Martin Bukowski
+
 """Handles the query_events intent from NLP result."""
 
 from pydantic import ValidationError

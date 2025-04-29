@@ -1,4 +1,6 @@
 # sa/db/strategies/get_event_by_id.py
+# Copyright (C) 2025 Martin Bukowski
+
 """Strategy to retrieve a single event by its ID, including relationships."""
 
 from sqlalchemy.ext.asyncio import AsyncSession

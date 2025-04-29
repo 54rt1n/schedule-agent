@@ -1,4 +1,6 @@
 # sa/core/logging_config.py
+# Copyright (C) 2025 Martin Bukowski
+
 """Logging configuration for the scheduling agent."""
 
 import logging
@@ -6,9 +8,8 @@ import sys
 
 import colorama
 import structlog
-from structlog.dev import Column, KeyValueColumnFormatter, LogLevelColumnFormatter # Import column formatters
+from structlog.dev import Column, KeyValueColumnFormatter, LogLevelColumnFormatter
 
-# Import settings
 from sa.core.settings import Settings
 
 

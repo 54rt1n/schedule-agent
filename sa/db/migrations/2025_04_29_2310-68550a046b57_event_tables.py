@@ -1,11 +1,8 @@
 # sa/db/migrations/68550a046b57_initial_schema.py
-"""Initial schema
+# Copyright (C) 2025 Martin Bukowski
 
-Revision ID: 68550a046b57
-Revises: 
-Create Date: 2025-04-16 17:09:18.436470
+"""Initial schema."""
 
-"""
 from typing import Sequence, Union
 
 from alembic import op

@@ -1,4 +1,6 @@
 # sa/api/__main__.py
+# Copyright (C) 2025 Martin Bukowski
+
 """Main entry point for the A2A Scheduling Agent API."""
 
 from contextlib import asynccontextmanager

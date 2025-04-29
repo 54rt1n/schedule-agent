@@ -1,4 +1,6 @@
 # sa/db/models/a2a.py
+# Copyright (C) 2025 Martin Bukowski
+
 """Models for the A2A Task."""
 
 from datetime import UTC, datetime

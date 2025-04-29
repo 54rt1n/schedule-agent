@@ -7,6 +7,7 @@ import pytest
 from sa.core.logging_config import get_logger
 from sa.event.date_utils import DateUtils
 from sa.db.models import Event, ExcludedDate, ModifiedInstance
+from sa.core.exceptions import InvalidInputError
 
 logger = get_logger(__name__)
 
@@ -784,30 +785,19 @@ def test_parse_nlp_date_range_start_after_end(date_utils: DateUtils):
     assert end_utc == expected_end
 
 def test_parse_nlp_date_range_invalid_input(date_utils: DateUtils):
-    """Test parsing with invalid date strings falls back gracefully."""
+    """Test parsing with invalid date strings raises InvalidInputError."""
     start_str = "not a date"
     end_str = "also not a date"
 
-    # Should fallback to defaults (today -> today + 7 days)
-    start_utc, end_utc = date_utils.parse_nlp_date_range(start_str, end_str)
-
-    assert isinstance(start_utc, datetime)
-    assert isinstance(end_utc, datetime)
-    assert start_utc.tzinfo == UTC
-    assert end_utc.tzinfo == UTC
-    assert start_utc < end_utc
+    # Expect InvalidInputError because start_str is invalid
+    with pytest.raises(InvalidInputError, match=f"Could not parse start date string: '{start_str}'"):
+        date_utils.parse_nlp_date_range(start_str, end_str)
 
 def test_parse_nlp_date_range_partial_invalid(date_utils: DateUtils):
-    """Test parsing with one valid and one invalid string."""
+    """Test parsing with one valid and one invalid string raises InvalidInputError."""
     start_str = "2024-10-01"
     end_str = "invalid end"
 
-    start_utc, end_utc = date_utils.parse_nlp_date_range(start_str, end_str)
-
-    expected_start = datetime(2024, 10, 1, 0, 0, 0, tzinfo=UTC)
-    # End should default to 7 days after the valid start
-    expected_end_date = datetime(2024, 10, 8).date()
-    expected_end = datetime.combine(expected_end_date, time(23, 59, 59, 999999), tzinfo=UTC)
-
-    assert start_utc == expected_start
-    assert end_utc == expected_end
+    # Expect InvalidInputError because end_str is invalid
+    with pytest.raises(InvalidInputError, match=f"Could not parse end date string: '{end_str}'"):
+        date_utils.parse_nlp_date_range(start_str, end_str)

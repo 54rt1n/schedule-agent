@@ -1,4 +1,6 @@
 # sa/a2a/command/structured_create.py
+# Copyright (C) 2025 Martin Bukowski
+
 """Handles the logic path for structured data input (create event ONLY)."""
 
 from pydantic import ValidationError

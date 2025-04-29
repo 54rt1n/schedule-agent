@@ -13,16 +13,11 @@ from sa.db.models import Event
 
 @pytest.mark.asyncio
 async def test_create_event_simple(
-    db_service: DatabaseService,
-    date_utils: DateUtils,
-    conflict_resolver: ConflictResolver,
-    # get_events_in_range_strategy: GetEventsInRangeStrategy, # Removed fixture parameter
-    create_event_strategy: CreateEventStrategy, # Need the fixture itself now
+    create_event_strategy: CreateEventStrategy,
 ):
     """Test creating a simple event works."""
     # --- Arrange ---
     # Use the fixture directly instead of manual instantiation
-    strategy = create_event_strategy
     event_data = EventCreate(
         title="Simple Create Test Event",
         start_time=datetime(2025, 3, 1, 10, 0, 0),
@@ -31,7 +26,7 @@ async def test_create_event_simple(
     )
 
     # --- Act ---
-    created_event = await strategy.execute(data=event_data)
+    created_event = await create_event_strategy.execute(data=event_data)
 
     # --- Assert ---
     # Basic check: Ensure the strategy returned an Event object with an ID

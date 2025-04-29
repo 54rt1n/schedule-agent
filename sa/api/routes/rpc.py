@@ -1,6 +1,9 @@
 # sa/api/routes/rpc.py
+# Copyright (C) 2025 Martin Bukowski
+
 """Routes for JSON-RPC API."""
 
+import sys
 from fastapi import APIRouter, Depends, Request
 from pydantic import ValidationError
 
@@ -11,6 +14,11 @@ from sa.a2a.command import (
     handle_structured_export,
     handle_structured_query,
     handle_structured_update,
+    # Add contact handlers
+    handle_structured_create_contact,
+    handle_structured_query_contact,
+    handle_structured_update_contact,
+    handle_structured_delete_contact,
 )
 from sa.a2a.dto import (
     CancelTaskParams,
@@ -55,6 +63,35 @@ from sa.a2a.exceptions import (
 
 logger = get_logger(__name__)
 router = APIRouter()
+
+# --- Helper for Task Failure ---
+
+async def _attempt_fail_task_on_error(
+    task_manager: SchedulingTaskManager,
+    task_id: str | None,
+    error: Exception | None
+):
+    """Attempts to mark a task as FAILED, logging any secondary errors."""
+    if not task_id or not error:
+        # Cannot fail task if ID or error is missing
+        return
+
+    logger.info(f"Attempting to fail task {task_id} due to {error.__class__.__name__}")
+    try:
+        # Create an error message
+        if isinstance(error, BaseA2AError) and hasattr(error, 'to_message'):
+            # Use the specific error's message generation if available
+            error_message = error.to_message()
+        else:
+            # Fallback to a generic message using the exception string
+            error_message = Message(role="agent", parts=[Part(type="text", text=f"Task failed due to error: {error}")])
+
+        await task_manager.fail_task(task_id, error_message)
+        logger.info(f"Task {task_id} marked as FAILED.")
+    except Exception as fail_exc:
+        # Log if failing the task itself fails, but don't raise to avoid masking original error context
+        logger.exception(f"Failed to mark task {task_id} as FAILED: {fail_exc}", exc_info=True)
+
 
 # --- Main Handler ---
 async def handle_tasks_send(
@@ -121,7 +158,8 @@ async def handle_tasks_send(
             elif intent == "query_events":
                 return await handle_structured_query(
                     task_id=task_id, payload=payload,
-                    task_manager=task_manager, db_service=db_service
+                    task_manager=task_manager, db_service=db_service,
+                    date_utils=date_utils
                 )
             elif intent == "delete_event":
                 return await handle_structured_delete(
@@ -140,6 +178,28 @@ async def handle_tasks_send(
                     task_manager=task_manager, db_service=db_service,
                     exporters=exporters, date_utils=date_utils
                 )
+            # --- Contact Intents ---
+            elif intent == "create_contact":
+                return await handle_structured_create_contact(
+                    task_id=task_id, payload=payload,
+                    task_manager=task_manager, db_service=db_service
+                )
+            elif intent == "query_contacts":
+                return await handle_structured_query_contact(
+                    task_id=task_id, payload=payload,
+                    task_manager=task_manager, db_service=db_service
+                )
+            elif intent == "update_contact":
+                return await handle_structured_update_contact(
+                    task_id=task_id, payload=payload,
+                    task_manager=task_manager, db_service=db_service
+                )
+            elif intent == "delete_contact":
+                return await handle_structured_delete_contact(
+                    task_id=task_id, payload=payload,
+                    task_manager=task_manager, db_service=db_service
+                )
+            # --- Fallback --- #
             else:
                 logger.warning(f"Received unsupported intent '{intent}' in structured data for task {task_id}")
                 raise A2AInvalidParamsError(f"Unsupported intent '{intent}' provided in structured data payload.")
@@ -197,14 +257,17 @@ async def handle_rpc_request(
     date_utils: DateUtils = Depends(get_date_utils),
 ) -> JSONRPCResponse:
     """Main JSON-RPC handler, routes based on method."""
-    # Access settings via app state
     logger.debug(f"Received RPC request: method={request.method}, request_id={request.id}")
-    request_id = request.id  # Store request id for response
+    request_id = request.id
+    task_successful = False
+    exception_caught: Exception | None = None
+    task_id_to_fail: str | None = None # Store potential task ID here
 
     try:
         # --- Method Routing ---
         if request.method == "tasks/send":
             parsed_params = TaskSendParams.model_validate(request.params or {})
+            task_id_to_fail = parsed_params.id # Store task ID for potential failure
             result_task = await handle_tasks_send(
                 params=parsed_params,
                 task_manager=task_manager,
@@ -214,68 +277,110 @@ async def handle_rpc_request(
                 date_utils=date_utils,
                 conflict_resolver=conflict_resolver,
             )
+            task_successful = True
             return JSONRPCResponse(id=request_id, result=result_task.model_dump())
 
         elif request.method == "tasks/get":
             parsed_params = TaskGetParams.model_validate(request.params or {})
+            # task_id_to_fail = parsed_params.id # tasks/get doesn't modify, maybe don't auto-fail?
             result_task = await handle_tasks_get(params=parsed_params, task_manager=task_manager)
+            task_successful = True
             return JSONRPCResponse(id=request_id, result=result_task.model_dump())
 
         elif request.method == "tasks/cancel":
             parsed_params = CancelTaskParams.model_validate(request.params or {})
+            task_id_to_fail = parsed_params.id # Store task ID for potential failure
             result_task = await handle_tasks_cancel(params=parsed_params, task_manager=task_manager)
+            task_successful = True
             return JSONRPCResponse(id=request_id, result=result_task.model_dump())
 
         else:
             logger.warning(f"Unsupported RPC method requested: {request.method}")
-            # Raise the *actual* exception now, not the DTO
             raise A2AMethodNotFoundError(f"Method '{request.method}' not found.")
-    # These are already A2A errors, so we can raise them directly
+
+    # --- Exception Handling ---
+    # These are already A2A errors, let them propagate to the main handler
     except BaseA2AError as known_error:
-        raise known_error
-    # Handle known errors here, translate to A2A errors before raising
+        exception_caught = known_error
+        raise known_error # Re-raise for main handler
+
+    # Handle known core errors, translate to A2A errors before raising
     except ValidationError as validation_error:
         logger.warning(
             f"Caught Pydantic ValidationError within route: {validation_error}",
             errors=validation_error.errors(),
         )
-
-        raise A2AInvalidParamsError(
+        a2a_error = A2AInvalidParamsError(
             message=f"Invalid parameters for method execution: {validation_error.title}",
             data=validation_error.errors()
         )
-    except EventNotFoundError as known_error:
-        raise A2AInvalidParamsError(message=known_error.message, data=known_error.data)
-    except TaskNotFoundError as known_error:
-        raise A2ATaskNotFoundError(message=known_error.message, data=known_error.data)
-    except DatabaseError as known_error:
-        raise A2AInternalError(message=known_error.message, data=known_error.data)
-    except NLPError as known_error:
-        raise A2AInternalError(message=known_error.message, data=known_error.data)
-    except ConflictError as known_error:
+        exception_caught = a2a_error
+        raise a2a_error
+    except EventNotFoundError as core_error:
+        a2a_error = A2AInvalidParamsError(message=core_error.message, data=core_error.data)
+        exception_caught = a2a_error
+        raise a2a_error
+    except TaskNotFoundError as core_error:
+        a2a_error = A2ATaskNotFoundError(message=core_error.message, data=core_error.data)
+        exception_caught = a2a_error
+        raise a2a_error
+    except DatabaseError as core_error:
+        a2a_error = A2AInternalError(message=core_error.message, data=core_error.data)
+        exception_caught = a2a_error
+        raise a2a_error
+    except NLPError as core_error:
+        a2a_error = A2AInternalError(message=core_error.message, data=core_error.data)
+        exception_caught = a2a_error
+        raise a2a_error
+    except ConflictError as core_error:
         error_data = {
             "details": "Scheduling conflict detected.",
-            "conflicts": [c["event"].model_dump(mode="json") for c in known_error.data if c.get("event")]
+            "conflicts": [c["event"].model_dump(mode="json") for c in core_error.data if c.get("event")]
         }
-        raise A2AInvalidParamsError(
-            message=known_error.message,
+        a2a_error = A2AInvalidParamsError(
+            message=core_error.message,
             data=error_data
         )
-    except ExporterError as known_error:
-        raise A2AInternalError(message=known_error.message, data=known_error.data)
-    except CoreLogicError as known_error:
-        raise A2AInternalError(message=known_error.message, data=known_error.data)
-    # Catch any other truly unexpected exception originating *within* this handler
+        exception_caught = a2a_error
+        raise a2a_error
+    except ExporterError as core_error:
+        a2a_error = A2AInternalError(message=core_error.message, data=core_error.data)
+        exception_caught = a2a_error
+        raise a2a_error
+    except CoreLogicError as core_error:
+        a2a_error = A2AInternalError(message=core_error.message, data=core_error.data)
+        exception_caught = a2a_error
+        raise a2a_error
+
+    # Catch any other truly unexpected exception
     except Exception as e:
-        # Log the unexpected error
+        exception_caught = e # Capture unexpected exception
         logger.exception(
             f"Caught unexpected exception in RPC handler for method {request.method}: {e}",
             exc_info=True
         )
-        # Raise the A2AInternalError *exception*.
-        # This will be caught by the BaseA2AError handler in __main__.py
+        # Raise a generic A2AInternalError that will be caught by the main handler
         raise A2AInternalError(
             message=f"Internal server error processing method {request.method}",
             data={"error_type": type(e).__name__}
         ) from e
+
+    finally:
+        # --- Attempt to Fail Task on Error ---
+        # This runs regardless of whether an exception was handled or not.
+        # It checks if the task was *not* marked successful AND an exception was caught.
+        if not task_successful and exception_caught:
+            # Try to determine task ID if not already set (e.g., for errors during parsing)
+            if not task_id_to_fail and isinstance(request.params, dict):
+                 if request.method in ("tasks/send", "tasks/cancel"): # Add other relevant methods if needed
+                     task_id_to_fail = request.params.get("id")
+
+            # Call the helper function to attempt failure
+            await _attempt_fail_task_on_error(
+                task_manager=task_manager,
+                task_id=task_id_to_fail,
+                error=exception_caught
+            )
+            # NOTE: The original exception is still propagating if it was raised in an except block.
+            # This finally block just adds the side effect of trying to fail the task.
 

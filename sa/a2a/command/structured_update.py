@@ -1,4 +1,6 @@
 # sa/a2a/command/structured_update.py
+# Copyright (C) 2025 Martin Bukowski
+
 """Handles the structured update_event intent."""
 
 from pydantic import ValidationError

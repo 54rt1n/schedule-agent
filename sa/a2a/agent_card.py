@@ -1,4 +1,6 @@
 # sa/a2a/agent_card.py
+# Copyright (C) 2025 Martin Bukowski
+
 """A2A Agent Card providing agent metadata and capabilities."""
 
 from sa.core.settings import Settings
@@ -70,6 +72,44 @@ def get_agent_card(settings: Settings) -> AgentCard:
                 name="Delete Event",
                 description="Delete existing calendar events (Not Implemented Yet).",
                 examples=["Cancel the meeting on Wednesday", "Delete the recurring team sync"],
+            ),
+            AgentSkill(
+                id="create_contact",
+                name="Create Contact",
+                description="Create a new contact with name, email, phone, and notes.",
+                examples=[
+                    "Add John Doe as a contact, email john.doe@example.com",
+                    '{"name": "Jane Smith", "email": "jane.s@example.net", "phone": "555-1234"}'
+                ]
+            ),
+            AgentSkill(
+                id="query_contacts",
+                name="Query Contacts",
+                description="Find contacts by name, email, or phone number.",
+                examples=[
+                    "Find contact John Doe",
+                    "Show me the contact info for jane.s@example.net",
+                    '{"name_contains": "Smith"}',
+                    '{"email": "john.doe@example.com"}'
+                ]
+            ),
+            AgentSkill(
+                id="update_contact",
+                name="Update Contact",
+                description="Modify an existing contact's details (name, email, phone, notes) using their ID.",
+                examples=[
+                    "Update John Doe's phone number to 555-9876",
+                    '{"id": "uuid-of-contact", "phone": "555-9876", "notes": "Updated contact info."}'
+                ]
+            ),
+            AgentSkill(
+                id="delete_contact",
+                name="Delete Contact",
+                description="Delete an existing contact using their ID.",
+                examples=[
+                    "Remove John Doe from my contacts",
+                    '{"id": "uuid-of-contact"}'
+                ]
             ),
         ],
     )

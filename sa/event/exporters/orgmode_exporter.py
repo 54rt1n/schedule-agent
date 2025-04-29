@@ -1,4 +1,6 @@
 # sa/event/exporters/orgmode_exporter.py
+# Copyright (C) 2025 Martin Bukowski
+
 """Org mode (.org) exporter for events."""
 
 from typing import Any

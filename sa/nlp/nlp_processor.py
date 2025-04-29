@@ -1,4 +1,6 @@
 # sa/nlp/nlp_processor.py
+# Copyright (C) 2025 Martin Bukowski
+
 """Processes natural language queries related to scheduling."""
 
 from sa.core.logging_config import get_logger

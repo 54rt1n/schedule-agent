@@ -235,4 +235,4 @@ def sample_event_data() -> dict:
         "start_time": datetime(2024, 8, 1, 10, 0, 0),
         "end_time": datetime(2024, 8, 1, 11, 0, 0),
         "time_zone": "UTC",
-    } 
+    }

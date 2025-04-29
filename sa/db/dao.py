@@ -1,8 +1,10 @@
 # sa/db/dao.py
+# Copyright (C) 2025 Martin Bukowski
+
 """Data Access Objects (DAOs) for database operations."""
 
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, EmailStr
 from sqlmodel import SQLModel
 from typing import Union
 import uuid
@@ -102,3 +104,45 @@ class UpdateA2ATaskStatus(BaseModel):
     new_status_message_json: str | None = None # JSON string of the new TaskStatus.message
     new_status_timestamp: datetime | None = None # Timestamp of the new TaskStatus
     new_history_json: str | None = None
+
+# --- Contact DAOs --- #
+
+class ContactGetById(BaseModel):
+    """DAO containing the ID of the contact to retrieve."""
+    id: uuid.UUID
+
+class ContactCreate(BaseModel):
+    """DAO for creating a new contact."""
+    name: str
+    email: EmailStr | None = None
+    phone: str | None = None
+    notes: str | None = None
+
+class ContactRead(BaseModel):
+    """DAO for reading contact data."""
+    id: uuid.UUID
+    name: str
+    email: EmailStr | None = None
+    phone: str | None = None
+    notes: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True} # Allow reading from ORM model
+
+class ContactUpdate(SQLModel):
+    """DAO for updating an existing contact. All fields are optional."""
+    # Note: We don't include ID here; it's usually passed separately to the strategy/function.
+    name: str | None = None
+    email: EmailStr | None = None
+    phone: str | None = None
+    notes: str | None = None
+
+class ContactQuery(BaseModel):
+    """DAO for querying contacts."""
+    name_contains: str | None = None
+    email: EmailStr | None = None
+
+class ContactDelete(SQLModel):
+    """DAO containing the ID of the contact to delete."""
+    id: uuid.UUID
