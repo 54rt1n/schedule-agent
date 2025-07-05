@@ -148,3 +148,5 @@ vendor/
 local/
 uv.lock
 .ruff_cache/
+volume/
+.cursor/

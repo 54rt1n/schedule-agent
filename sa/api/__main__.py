@@ -270,6 +270,14 @@ def main(settings: Settings) -> FastAPI:
 
     return app
 
+
+def create_app() -> FastAPI:
+    """Factory function for creating the FastAPI app (used by uvicorn)."""
+    from sa.core.settings import Settings
+    settings = Settings()
+    return main(settings)
+
+
 if __name__ == "__main__":
     import uvicorn
     settings = Settings()

@@ -542,7 +542,7 @@ def register_handlers(
     # --- Event Tool Wrappers ---
 
     @mcp.tool()
-    async def create_event_tool(
+    async def create_event(
         title: str,
         start_time: str,
         end_time: str,
@@ -586,7 +586,7 @@ def register_handlers(
         )
 
     @mcp.tool()
-    async def query_events_tool(
+    async def query_events(
         start_time: Optional[str] = None,
         end_time: Optional[str] = None,
         title_contains: Optional[str] = None,
@@ -611,7 +611,7 @@ def register_handlers(
         )
 
     @mcp.tool()
-    async def update_event_tool(
+    async def update_event(
         event_id: str,
         # Use Dict directly for flexibility, validation happens in schedule_update_event
         update_data: Dict[str, Any],
@@ -635,7 +635,7 @@ def register_handlers(
         )
 
     @mcp.tool()
-    async def delete_event_tool(
+    async def delete_event(
         event_id: str,
     ) -> Dict[str, Any]:
         """Deletes an existing event identified by its unique ID."""
@@ -647,7 +647,7 @@ def register_handlers(
     # --- Contact Tool Wrappers (New) ---
 
     @mcp.tool()
-    async def create_contact_tool(
+    async def create_contact(
         name: str,
         email: Optional[str] = None,
         phone: Optional[str] = None,
@@ -673,7 +673,7 @@ def register_handlers(
         )
 
     @mcp.tool()
-    async def query_contacts_tool(
+    async def query_contacts(
         name_contains: Optional[str] = None,
         email_contains: Optional[str] = None,
     ) -> Dict[str, Any]:
@@ -693,7 +693,7 @@ def register_handlers(
         )
 
     @mcp.tool()
-    async def update_contact_tool(
+    async def update_contact(
         contact_id: str,
         update_data: Dict[str, Any],
     ) -> Dict[str, Any]:
@@ -710,7 +710,7 @@ def register_handlers(
         )
 
     @mcp.tool()
-    async def delete_contact_tool(
+    async def delete_contact(
         contact_id: str,
     ) -> Dict[str, Any]:
         """Deletes an existing contact identified by its unique ID."""

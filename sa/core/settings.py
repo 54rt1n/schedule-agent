@@ -4,15 +4,23 @@
 """Settings for the scheduling agent."""
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import computed_field
+from pydantic import computed_field, Field
 
 
 class Settings(BaseSettings):
-    # Security
-    api_keys: list[str] = []  # Default to empty list if not set
+    # Security - store as string to avoid JSON parsing issues
+    api_keys_raw: str = Field(default="", alias="api_keys")
+    
+    @computed_field
+    @property
+    def api_keys(self) -> list[str]:
+        """Parse API keys from comma-separated string."""
+        if not self.api_keys_raw.strip():
+            return []
+        return [key.strip() for key in self.api_keys_raw.split(',') if key.strip()]
 
     # Database Configuration
-    database_url: str = "sqlite+aiosqlite:///./local/schedule_agent.db"
+    database_url: str = "sqlite+aiosqlite:////app/local/schedule_agent.db"
 
     # LLM Provider Configuration
     llm_api_key: str | None = None
@@ -21,7 +29,7 @@ class Settings(BaseSettings):
 
     # Server Configuration
     server_host: str = "0.0.0.0"
-    server_port: int = 8000
+    server_port: int = 8081
 
     # Agent Configuration
     default_timezone: str = "UTC"

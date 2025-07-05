@@ -57,15 +57,17 @@ async def main(settings: Settings):
     try:
         if transport == "stdio":
             logger.info("Running MCP server with stdio transport...")
-            await mcp_instance.run_stdio_async(settings)
+            await mcp_instance.run_stdio_async()
         else: # sse
             logger.info("Running MCP server with sse transport...")
-            await mcp_instance.run_sse_async(settings)
+            await mcp_instance.run_sse_async()
 
         logger.info("Server run method completed normally.")
 
     except Exception as e:
-        logger.exception(f"Server exited unexpectedly: {e}")
+        logger.exception(f"Server exited unexpectedly: {e}", exc_info=True)
+        import traceback
+        traceback.print_exc()
         exit_code = 1
 
     logger.info(f"Main coroutine finished. Exiting with code {exit_code}.")

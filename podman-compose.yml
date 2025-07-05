@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  schedule-agent:
+    image: schedule-agent:latest
+    container_name: schedule-agent
+    user: "1000:1000"  # Run as local user to fix volume permissions
+    ports:
+      - "8082:8082"   # A2A Server
+      - "8081:8081"   # MCP Server
+    volumes:
+      - ./volume/config:/app/config:ro
+      - ./volume/local:/app/local:rw
+    env_file:
+      - ${CUSTOM_ENV_FILE:-./volume/config/app.env}
+    restart: unless-stopped
+    networks:
+      - schedule-agent-network
+
+networks:
+  schedule-agent-network:
+    name: schedule-agent-network
+    external: true 

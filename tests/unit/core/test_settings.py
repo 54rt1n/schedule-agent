@@ -41,7 +41,7 @@ def test_default_settings():
     assert settings.llm_base_url is None
     assert settings.llm_model == "gpt-4o-mini"
     assert settings.server_host == "0.0.0.0"
-    assert settings.server_port == 8000
+    assert settings.server_port == 8081
     assert settings.default_timezone == "UTC"
     assert settings.agent_version == "0.1.0"
     assert settings.log_level == "INFO"
