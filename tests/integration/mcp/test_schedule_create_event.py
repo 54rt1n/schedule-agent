@@ -4,16 +4,15 @@ import uuid
 from datetime import datetime, timezone, timedelta
 import pytest
 
-from sa.event.date_utils import DateUtils
-from sa.db.models import Event
-from sa.event.conflict_resolver import ConflictResolver
-from sa.db.service import DatabaseService
-from sa.mcp.handlers import schedule_create_event
+from schedule_core.event.date_utils import DateUtils
+from schedule_core.db.models import Event
+from schedule_core.event.conflict_resolver import ConflictResolver
+from schedule_core.db.service import DatabaseService
 
 
 @pytest.mark.asyncio
 async def test_schedule_create_event_success(
-    mcp_test_db_service: DatabaseService,
+    mcp_call, mcp_test_db_service: DatabaseService,
     mcp_test_conflict_resolver: ConflictResolver,
     mcp_test_date_utils: DateUtils,
 ):
@@ -32,12 +31,7 @@ async def test_schedule_create_event_success(
         "rrule": None,
     }
 
-    result = await schedule_create_event(
-        **params,
-        db_service=mcp_test_db_service,
-        date_utils=mcp_test_date_utils,
-        conflict_resolver=mcp_test_conflict_resolver
-    )
+    result = await mcp_call('create_event', {'event': {'kind': 'timed', **params}})
 
     # Assert Handler Response
     assert result is not None

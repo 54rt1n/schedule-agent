@@ -3,11 +3,11 @@ import uuid
 from fastapi.testclient import TestClient
 from datetime import datetime, timezone, timedelta
 
-from sa.a2a.dto import TaskSendParams, Message, Part, TaskState
-from sa.db.dao import EventCreate
-from sa.db.service import DatabaseService
-from sa.event.date_utils import DateUtils
-from sa.event.conflict_resolver import ConflictResolver
+from schedule_a2a.dto import TaskSendParams, Message, Part, TaskState
+from schedule_core.db.dao import EventCreate
+from schedule_core.db.service import DatabaseService
+from schedule_core.event.date_utils import DateUtils
+from schedule_core.event.conflict_resolver import ConflictResolver
 from ..conftest import build_rpc_request, create_db_event
 
 def test_rpc_tasks_send_structured_create_success(client: TestClient, auth_headers_valid: dict):

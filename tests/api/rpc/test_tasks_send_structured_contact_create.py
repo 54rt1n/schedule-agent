@@ -5,10 +5,10 @@ import pytest
 import uuid
 from fastapi.testclient import TestClient
 
-from sa.a2a.dto import TaskSendParams, Message, Part, TaskState
-from sa.db.dao import ContactGetById
-from sa.db.service import DatabaseService
-from sa.db.strategies.contact_get_by_id import GetContactByIdStrategy
+from schedule_a2a.dto import TaskSendParams, Message, Part, TaskState
+from schedule_core.db.dao import ContactGetById
+from schedule_core.db.service import DatabaseService
+from schedule_core.db.strategies.contact_get_by_id import GetContactByIdStrategy
 from ..conftest import build_rpc_request
 
 # Mark all tests in this module as async

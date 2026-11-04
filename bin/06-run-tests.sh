@@ -25,13 +25,13 @@ if [ -z "$VIRTUAL_ENV" ]; then
         echo "No virtual environment found. Creating one..."
         python3.12 -m venv .venv
         source .venv/bin/activate
-        uv pip install -e ".[dev]"
+        uv sync --all-packages --extra dev
     fi
 fi
 
 # Ensure test dependencies are installed
 echo "Ensuring test dependencies are installed..."
-uv pip install -e ".[dev]"
+uv sync --all-packages --extra dev
 
 # Run tests based on mode
 case ${TEST_MODE} in

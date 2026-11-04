@@ -6,10 +6,10 @@ import uuid
 from fastapi.testclient import TestClient
 import json
 
-from sa.a2a.dto import TaskSendParams, Message, Part, TaskState
-from sa.db.dao import ContactCreate, ContactGetById
-from sa.db.service import DatabaseService
-from sa.db.strategies.contact_create import CreateContactStrategy
+from schedule_a2a.dto import TaskSendParams, Message, Part, TaskState
+from schedule_core.db.dao import ContactCreate, ContactGetById
+from schedule_core.db.service import DatabaseService
+from schedule_core.db.strategies.contact_create import CreateContactStrategy
 from ..conftest import build_rpc_request
 
 # Mark all tests in this module as async

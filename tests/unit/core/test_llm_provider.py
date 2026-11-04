@@ -3,8 +3,8 @@ from unittest.mock import patch, MagicMock, AsyncMock
 import openai  # For error types
 import json
 
-from sa.nlp.llm_provider import LLMProvider
-from sa.core.settings import Settings
+from schedule_nlp.llm_provider import LLMProvider
+from schedule_core.core.settings import Settings
 
 # Test Factory Method (`from_settings`) and Initialization Logic via Factory
 # ==========================================================================
@@ -48,7 +48,7 @@ def mock_settings_override() -> MagicMock:
     return settings
 
 @patch('openai.AsyncClient')
-@patch('sa.nlp.llm_provider.logger')
+@patch('schedule_nlp.llm_provider.logger')
 def test_from_settings_local(mock_logger, mock_AsyncClient, mock_settings_local):
     """Test factory uses local settings correctly."""
     # Act
@@ -68,7 +68,7 @@ def test_from_settings_local(mock_logger, mock_AsyncClient, mock_settings_local)
     )
 
 @patch('openai.AsyncClient')
-@patch('sa.nlp.llm_provider.logger')
+@patch('schedule_nlp.llm_provider.logger')
 def test_from_settings_openai_with_key(mock_logger, mock_AsyncClient, mock_settings_openai_key):
     """Test factory defaults to OpenAI URL and uses provided key."""
     # Act
@@ -92,7 +92,7 @@ def test_from_settings_openai_with_key(mock_logger, mock_AsyncClient, mock_setti
     )
 
 @patch('openai.AsyncClient')
-@patch('sa.nlp.llm_provider.logger')
+@patch('schedule_nlp.llm_provider.logger')
 def test_from_settings_openai_without_key(mock_logger, mock_AsyncClient, mock_settings_openai_no_key):
     """Test factory defaults to OpenAI URL and logs warning if key is missing."""
     # Act
@@ -118,7 +118,7 @@ def test_from_settings_openai_without_key(mock_logger, mock_AsyncClient, mock_se
     )
 
 @patch('openai.AsyncClient')
-@patch('sa.nlp.llm_provider.logger')
+@patch('schedule_nlp.llm_provider.logger')
 def test_from_settings_override(mock_logger, mock_AsyncClient, mock_settings_override):
     """Test factory uses explicitly overridden settings."""
     # Act
@@ -229,7 +229,7 @@ async def test_generate_json_success(provider_instance):
     )
 
 @pytest.mark.asyncio
-@patch('sa.nlp.llm_provider.logger')
+@patch('schedule_nlp.llm_provider.logger')
 async def test_generate_json_parsing_error(mock_logger, provider_instance):
     """Test handling of invalid JSON response from LLM."""
     # Arrange
@@ -249,7 +249,7 @@ async def test_generate_json_parsing_error(mock_logger, provider_instance):
     assert mock_logger.warning.call_args.kwargs['raw_content'] == "This is not JSON {"
 
 @pytest.mark.asyncio
-@patch('sa.nlp.llm_provider.logger')
+@patch('schedule_nlp.llm_provider.logger')
 async def test_generate_json_api_connection_error(mock_logger, provider_instance):
     """Test handling of API connection errors."""
     # Arrange
@@ -266,7 +266,7 @@ async def test_generate_json_api_connection_error(mock_logger, provider_instance
     mock_logger.exception.assert_called_with("LLM API connection error")
 
 @pytest.mark.asyncio
-@patch('sa.nlp.llm_provider.logger')
+@patch('schedule_nlp.llm_provider.logger')
 async def test_generate_json_rate_limit_error(mock_logger, provider_instance):
     """Test handling of rate limit errors."""
     # Arrange
@@ -285,7 +285,7 @@ async def test_generate_json_rate_limit_error(mock_logger, provider_instance):
 
 
 @pytest.mark.asyncio
-@patch('sa.nlp.llm_provider.logger')
+@patch('schedule_nlp.llm_provider.logger')
 async def test_generate_json_authentication_error(mock_logger, provider_instance):
     """Test handling of authentication errors."""
     # Arrange
@@ -303,7 +303,7 @@ async def test_generate_json_authentication_error(mock_logger, provider_instance
     mock_logger.exception.assert_called_with("LLM API authentication error")
 
 @pytest.mark.asyncio
-@patch('sa.nlp.llm_provider.logger')
+@patch('schedule_nlp.llm_provider.logger')
 async def test_generate_json_api_status_error(mock_logger, provider_instance):
     """Test handling of generic API status errors."""
     # Arrange
@@ -325,7 +325,7 @@ async def test_generate_json_api_status_error(mock_logger, provider_instance):
     )
 
 @pytest.mark.asyncio
-@patch('sa.nlp.llm_provider.logger')
+@patch('schedule_nlp.llm_provider.logger')
 async def test_generate_json_unexpected_error(mock_logger, provider_instance):
     """Test handling of unexpected errors during API call."""
     # Arrange
@@ -341,7 +341,7 @@ async def test_generate_json_unexpected_error(mock_logger, provider_instance):
     mock_logger.exception.assert_called_with("Unexpected error during LLM API call")
 
 @pytest.mark.asyncio
-@patch('sa.nlp.llm_provider.logger')
+@patch('schedule_nlp.llm_provider.logger')
 async def test_generate_json_no_choices(mock_logger, provider_instance):
     """Test handling response with no choices."""
     # Arrange
@@ -359,7 +359,7 @@ async def test_generate_json_no_choices(mock_logger, provider_instance):
     )
 
 @pytest.mark.asyncio
-@patch('sa.nlp.llm_provider.logger')
+@patch('schedule_nlp.llm_provider.logger')
 async def test_generate_json_no_message(mock_logger, provider_instance):
     """Test handling response with choice but no message."""
     # Arrange
@@ -378,7 +378,7 @@ async def test_generate_json_no_message(mock_logger, provider_instance):
     )
 
 @pytest.mark.asyncio
-@patch('sa.nlp.llm_provider.logger')
+@patch('schedule_nlp.llm_provider.logger')
 async def test_generate_json_none_content(mock_logger, provider_instance):
     """Test handling response with message but None content."""
     # Arrange

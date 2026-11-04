@@ -3,7 +3,7 @@ from datetime import datetime, timezone, UTC # Correct import for UTC
 
 import pytest
 from pydantic import ValidationError
-from sa.db.models.contact import Contact # Import the actual model
+from schedule_core.db.models.contact import Contact # Import the actual model
 
 
 def test_import_contact_model():
@@ -64,22 +64,6 @@ def test_contact_model_missing_required_fields():
         # Use model_validate with data missing 'name'
         Contact.model_validate({"email": "test@example.com"})
 
-
-# Keep this placeholder as unit tests cannot truly check DB uniqueness
-@pytest.mark.xfail(reason="DB unique constraint cannot be tested in unit test")
-def test_contact_model_email_unique_constraint_placeholder():
-    """
-    Placeholder test for the unique constraint on email.
-    Actual enforcement is at the DB level and tested via integration tests/migration review.
-    This test primarily checks if the field exists and accepts email-like strings.
-    """
-    now_naive = datetime.now(UTC).replace(tzinfo=None)
-    # Need name field for validation if using model_validate, or direct instantiation for this test
-    contact = Contact(name="Unique Email Test", email="unique@example.com", created_at=now_naive, updated_at=now_naive)
-    assert contact.email == "unique@example.com"
-    # We cannot directly test the DB unique constraint here in a unit test.
-    # Simulate failure to keep it marked xfail
-    pytest.fail("DB unique constraint cannot be tested in unit test")
 
 
 def test_contact_model_timestamps_defaults():

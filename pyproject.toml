@@ -1,13 +1,9 @@
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
 [project]
 name = "scheduling_agent"
 version = "0.1.0"
 description = "Scheduling Agent for calendar management"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11,<3.14"
 license = { file = "LICENSE" }
 authors = [
   { name = "Martin Bukowski", email = "martin@bmds.us" }
@@ -19,32 +15,8 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
-dependencies = [
-  "mcp[cli]>=1.6.0",
-  "fastapi>=0.104.0",
-  "uvicorn>=0.23.2",
-  "sqlalchemy[asyncio]>=2.0.22",
-  "sqlmodel>=0.0.14",
-  "pydantic>=2.4.2",
-  "pydantic-settings",
-  "email-validator>=2.0.0",
-  "python-dateutil>=2.8.2",
-  "icalendar>=5.0.7",
-  "python-dotenv>=1.0.0",
-  "PyJWT>=2.8.0",
-  "openai>=1.1.1",
-  "dateparser>=1.1.8",
-  "httpx>=0.25.0",
-  "structlog>=23.2.0",
-  "alembic>=1.12.0",
-  "sqlite-utils>=3.35.0",
-  "asyncpg",
-  "greenlet",
-  "aiosqlite",
-  "asyncstdlib",
-  "zoneinfo; python_version < '3.9'",
-  "colorama",
-]
+dependencies = []
+
 
 [project.optional-dependencies]
 dev = [
@@ -61,11 +33,8 @@ dev = [
   "pre-commit",
 ]
 
-[project.scripts]
-schedule-agent = "sa.__main__:main" # Example entry point
-
-[tool.hatch.build.targets.wheel]
-packages = ["sa"]
+[tool.uv]
+package = false
 
 [tool.ruff]
 target-version = "py312"
@@ -153,3 +122,10 @@ pretty = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 pythonpath = ["."]
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+schedule-core = { workspace = true }
+schedule-cli = { workspace = true }

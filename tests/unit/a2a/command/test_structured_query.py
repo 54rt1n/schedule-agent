@@ -5,19 +5,19 @@ import json
 from datetime import datetime, timezone, timedelta
 
 # Import necessary types and handlers
-from sa.a2a.command.structured_query import handle_structured_query
-from sa.a2a.dto import (
+from schedule_a2a.command.structured_query import handle_structured_query
+from schedule_a2a.dto import (
     Task,
     TaskState,
     TaskStatus,
     Message,
     Part,
 )
-from sa.a2a.exceptions import InvalidParamsError
-from sa.db.models import Event
-from sa.db.dao import TimeRange
-from sa.db.strategies.get_events_in_range import GetEventsInRangeStrategy
-from sa.event.date_utils import DateUtils
+from schedule_a2a.exceptions import InvalidParamsError
+from schedule_core.db.models import Event
+from schedule_core.db.dao import TimeRange
+from schedule_core.db.strategies.get_events_in_range import GetEventsInRangeStrategy
+from schedule_core.event.date_utils import DateUtils
 
 # Mock return task from TaskManager
 mock_completed_task = Task(
@@ -26,7 +26,7 @@ mock_completed_task = Task(
 )
 
 @pytest.mark.asyncio
-@patch("sa.a2a.command.structured_query.GetEventsInRangeStrategy")
+@patch("schedule_a2a.command.structured_query.GetEventsInRangeStrategy")
 async def test_handle_structured_query(
     mock_get_strategy_class: MagicMock,
     mock_task_manager: MagicMock,

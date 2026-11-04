@@ -4,20 +4,20 @@ from unittest.mock import patch, AsyncMock
 import uuid
 from datetime import datetime
 
-from sa.a2a.exceptions import (
+from schedule_a2a.exceptions import (
     PARSE_ERROR, INVALID_REQUEST, METHOD_NOT_FOUND, INVALID_PARAMS, INTERNAL_ERROR,
     ParseError, InvalidRequestError, MethodNotFoundError, InvalidParamsError, InternalError,
     TaskNotFoundError as A2ATaskNotFoundError
 )
-from sa.core.exceptions import (
+from schedule_core.core.exceptions import (
     DatabaseError, NLPError, EventNotFoundError, TaskNotFoundError, CoreLogicError,
     ConflictError, ExporterError,
 )
-from sa.a2a.dto import TaskState
-from sa.db.service import DatabaseService
-from sa.event.date_utils import DateUtils
-from sa.event.conflict_resolver import ConflictResolver
-from sa.db.dao import EventCreate
+from schedule_a2a.dto import TaskState
+from schedule_core.db.service import DatabaseService
+from schedule_core.event.date_utils import DateUtils
+from schedule_core.event.conflict_resolver import ConflictResolver
+from schedule_core.db.dao import EventCreate
 
 from ..conftest import build_rpc_request, create_db_event
 
@@ -139,8 +139,8 @@ def test_rpc_exception_mapping_database_error(client: TestClient, auth_headers_v
     task_id = "task-db-error"
     error_message = "Simulated DB connection failure"
 
-    with patch("sa.api.routes.rpc.handle_tasks_get", new_callable=AsyncMock) as mock_handler:
-        # Patch the *core* exception TaskNotFoundError from sa.core.exceptions if handle_tasks_get raises it
+    with patch("schedule_api.routes.rpc.handle_tasks_get", new_callable=AsyncMock) as mock_handler:
+        # Patch the *core* exception TaskNotFoundError from schedule_core.core.exceptions if handle_tasks_get raises it
         # Or patch the A2A exception if handle_tasks_get raises that directly (depends on implementation)
         mock_handler.side_effect = DatabaseError(error_message, data={"taskId": task_id}) # Pass data here
         rpc_payload = build_rpc_request("tasks/get", {"id": task_id})
@@ -175,7 +175,7 @@ def test_rpc_exception_mapping_nlp_error(client: TestClient, auth_headers_valid:
 
     # Decide which handler to patch based on the actual flow for NLP errors
     # If handle_tasks_send calls handle_nlp_request and *that* raises NLPError:
-    with patch("sa.api.routes.rpc.handle_nlp_request", new_callable=AsyncMock) as mock_handler:
+    with patch("schedule_api.routes.rpc.handle_nlp_request", new_callable=AsyncMock) as mock_handler:
         mock_handler.side_effect = NLPError(error_message, data={"taskId": task_id}) # Pass data
         response = client.post("/api/rpc", json=rpc_payload, headers=auth_headers_valid)
 
@@ -198,7 +198,7 @@ def test_rpc_exception_mapping_generic_exception(client: TestClient, auth_header
     task_id = "task-generic-error"
     error_message = "Something unexpected happened!" # This specific message won't appear
 
-    with patch("sa.api.routes.rpc.handle_tasks_get", new_callable=AsyncMock) as mock_handler:
+    with patch("schedule_api.routes.rpc.handle_tasks_get", new_callable=AsyncMock) as mock_handler:
         mock_handler.side_effect = Exception(error_message)
         rpc_payload = build_rpc_request("tasks/get", {"id": task_id})
         response = client.post("/api/rpc", json=rpc_payload, headers=auth_headers_valid)
@@ -246,7 +246,7 @@ def test_rpc_exception_mapping_a2a_from_handler(client: TestClient, auth_headers
     rpc_payload = build_rpc_request("tasks/send", send_params)
 
     # Patch the handler that is expected to raise the A2A error
-    with patch("sa.api.routes.rpc.handle_structured_update", new_callable=AsyncMock) as mock_handler:
+    with patch("schedule_api.routes.rpc.handle_structured_update", new_callable=AsyncMock) as mock_handler:
         # Raise the *A2A* specific exception directly
         mock_handler.side_effect = A2ATaskNotFoundError(error_message) # No data needed for this test case
         response = client.post("/api/rpc", json=rpc_payload, headers=auth_headers_valid)
@@ -346,7 +346,6 @@ async def test_rpc_exception_mapping_conflict_error_to_invalid_params(
             break
     assert found_conflict, f"Conflicting event ID {existing_event.id} not found in artifact"
 
-@pytest.mark.skip(reason="tasks/send does not yet handle export_schedule intent")
 def test_rpc_exception_mapping_exporter_error_to_internal_error(
     client: TestClient, auth_headers_valid: dict
 ):
@@ -354,19 +353,19 @@ def test_rpc_exception_mapping_exporter_error_to_internal_error(
     task_id = f"task-exporter-error-{uuid.uuid4()}"
     error_message = "Simulated ICS export service failure"
 
-    export_payload = {"format": "ics", "start_date": "2025-01-01", "end_date": "2025-01-31"}
+    export_payload = {"format": "ics", "date_info": {"start_date": "2025-01-01", "end_date": "2025-01-31"}}
     send_params = {
         "id": task_id,
-        "intent": "export_schedule",
+        "intent": "export_calendar",
         "message": {
             "role": "user",
-            "parts": [{"type": "data", "data": export_payload}]
+            "parts": [{"type": "data", "data": {"intent": "export_calendar", "payload": export_payload}}]
         }
     }
     rpc_payload = build_rpc_request("tasks/send", send_params)
 
     # Patch the export method at its correct location
-    with patch("sa.event.exporters.ical_exporter.ICalExporter.export", side_effect=ExporterError(error_message, data={"reason": "mock failure"})) as mock_export_method:
+    with patch("schedule_core.event.exporters.ical_exporter.ICalExporter.export", side_effect=ExporterError(error_message, data={"reason": "mock failure"})) as mock_export_method:
 
         response = client.post("/api/rpc", json=rpc_payload, headers=auth_headers_valid)
 
@@ -384,7 +383,7 @@ def test_rpc_exception_mapping_exporter_error_to_internal_error(
     assert error_payload["data"] is not None
     assert error_payload["data"]["reason"] == "mock failure"
 
-    # TODO: Verify mock call count after confirming patch target
+    mock_export_method.assert_called_once()
 
 def test_rpc_tasks_send_missing_intent_for_structured_data(
     client: TestClient, auth_headers_valid: dict

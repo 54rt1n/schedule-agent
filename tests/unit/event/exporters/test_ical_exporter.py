@@ -3,10 +3,10 @@ from datetime import UTC, datetime
 import pytest
 from icalendar import Calendar
 
-from sa.core.logging_config import get_logger
-from sa.event.date_utils import DateUtils
-from sa.event.exporters.ical_exporter import ICalExporter
-from sa.db.models import Event
+from schedule_core.core.logging_config import get_logger
+from schedule_core.event.date_utils import DateUtils
+from schedule_core.event.exporters.ical_exporter import ICalExporter
+from schedule_core.db.models import Event
 
 logger = get_logger(__name__)
 

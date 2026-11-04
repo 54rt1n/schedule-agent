@@ -6,7 +6,7 @@ import pytest
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Direct import, assuming sa_core is discoverable via path configuration
-from sa.core.settings import Settings
+from schedule_core.core.settings import Settings
 
 # Fixture to clear relevant environment variables before each test
 @pytest.fixture(autouse=True)
@@ -145,3 +145,17 @@ def test_type_coercion(monkeypatch):
     # monkeypatch.setenv("API_KEYS", "key_d,key_e")
     # settings_comma = Settings()
     # assert settings_comma.api_keys == ["key_d", "key_e"] # This might fail depending on pydantic-settings version/config 
+
+
+@pytest.mark.parametrize("value", ["first, second", '["first", "second"]'])
+def test_api_keys_accept_supported_environment_formats(monkeypatch, value):
+    monkeypatch.setenv("API_KEYS", value)
+    assert Settings(_env_file=None).api_keys == ["first", "second"]
+
+
+def test_api_keys_validate_constructor_values():
+    from pydantic import ValidationError
+
+    assert Settings(_env_file=None, api_keys=["first"]).api_keys == ["first"]
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, api_keys='[123]')

@@ -3,21 +3,21 @@ import uuid
 
 import pytest
 
-from sa.db.dao import EventCreate
-from sa.db.service import DatabaseService
-from sa.event.date_utils import DateUtils
-from sa.event.conflict_resolver import ConflictResolver
-from sa.db.strategies.get_events_in_range import GetEventsInRangeStrategy
-from sa.db.strategies.create_event import CreateEventStrategy
-from sa.db.strategies.get_event_by_id import GetEventByIdStrategy
-from sa.db.strategies.save_a2a_task import SaveA2ATaskStrategy
-from sa.db.strategies.get_a2a_task_by_id import GetA2ATaskByIdStrategy
-from sa.db.strategies.update_a2a_task_status import UpdateA2ATaskStatusStrategy
-from sa.db.strategies.contact_create import CreateContactStrategy
-from sa.db.strategies.contact_find import FindContactsStrategy
-from sa.db.strategies.contact_get_by_id import GetContactByIdStrategy
-from sa.db.strategies.contact_update import UpdateContactStrategy
-from sa.db.strategies.contact_delete import DeleteContactStrategy
+from schedule_core.db.dao import EventCreate
+from schedule_core.db.service import DatabaseService
+from schedule_core.event.date_utils import DateUtils
+from schedule_core.event.conflict_resolver import ConflictResolver
+from schedule_core.db.strategies.get_events_in_range import GetEventsInRangeStrategy
+from schedule_core.db.strategies.create_event import CreateEventStrategy
+from schedule_core.db.strategies.get_event_by_id import GetEventByIdStrategy
+from schedule_core.db.strategies.save_a2a_task import SaveA2ATaskStrategy
+from schedule_core.db.strategies.get_a2a_task_by_id import GetA2ATaskByIdStrategy
+from schedule_core.db.strategies.update_a2a_task_status import UpdateA2ATaskStatusStrategy
+from schedule_core.db.strategies.contact_create import CreateContactStrategy
+from schedule_core.db.strategies.contact_find import FindContactsStrategy
+from schedule_core.db.strategies.contact_get_by_id import GetContactByIdStrategy
+from schedule_core.db.strategies.contact_update import UpdateContactStrategy
+from schedule_core.db.strategies.contact_delete import DeleteContactStrategy
 
 # Generic Sample Event Data (adjust if tests need more specific versions)
 @pytest.fixture

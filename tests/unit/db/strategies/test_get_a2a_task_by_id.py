@@ -3,12 +3,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from unittest.mock import MagicMock, AsyncMock
 import uuid
 
-from sa.core.logging_config import get_logger
-from sa.db.models.a2a import A2ATask
-from sa.db.strategies.get_a2a_task_by_id import GetA2ATaskByIdStrategy
-from sa.db.service import DatabaseService
-from sa.db.dao import GetA2ATaskById
-from sa.a2a.dto import TaskState
+from schedule_core.core.logging_config import get_logger
+from schedule_core.db.models.a2a import A2ATask
+from schedule_core.db.strategies.get_a2a_task_by_id import GetA2ATaskByIdStrategy
+from schedule_core.db.service import DatabaseService
+from schedule_core.db.dao import GetA2ATaskById
+from schedule_a2a.dto import TaskState
 
 logger = get_logger(__name__)
 

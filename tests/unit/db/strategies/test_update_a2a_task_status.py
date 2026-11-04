@@ -5,13 +5,13 @@ import uuid
 import json
 from datetime import UTC, datetime
 
-from sa.core.logging_config import get_logger
-from sa.db.models.a2a import A2ATask
-from sa.db.strategies.update_a2a_task_status import UpdateA2ATaskStatusStrategy
-from sa.db.dao import UpdateA2ATaskStatus
-from sa.db.service import DatabaseService
-from sa.core.exceptions import DatabaseError, TaskNotFoundError as CoreTaskNotFoundError
-from sa.a2a.dto import TaskState
+from schedule_core.core.logging_config import get_logger
+from schedule_core.db.models.a2a import A2ATask
+from schedule_core.db.strategies.update_a2a_task_status import UpdateA2ATaskStatusStrategy
+from schedule_core.db.dao import UpdateA2ATaskStatus
+from schedule_core.db.service import DatabaseService
+from schedule_core.core.exceptions import DatabaseError, TaskNotFoundError as CoreTaskNotFoundError
+from schedule_a2a.dto import TaskState
 
 logger = get_logger(__name__)
 

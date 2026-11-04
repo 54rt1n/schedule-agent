@@ -6,11 +6,11 @@ import pytest
 # Import Calendar for parsing back the result
 from icalendar import Calendar
 
-from sa.core.logging_config import get_logger
-from sa.event.date_utils import DateUtils
-from sa.event.exporters.ical_exporter import ICalExporter
-from sa.event.exporters.orgmode_exporter import OrgModeExporter
-from sa.db.models import Event, Participant
+from schedule_core.core.logging_config import get_logger
+from schedule_core.event.date_utils import DateUtils
+from schedule_core.event.exporters.ical_exporter import ICalExporter
+from schedule_core.event.exporters.orgmode_exporter import OrgModeExporter
+from schedule_core.db.models import Event, Participant
 
 logger = get_logger(__name__)
 

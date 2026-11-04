@@ -7,11 +7,11 @@ from sqlalchemy import func # For lower()
 import pytest_asyncio # Import for async fixture
 
 # Assuming necessary imports - adjust as needed
-from sa.db.models import Contact
-from sa.db.dao import ContactCreate, ContactQuery
-from sa.db.strategies.contact_create import CreateContactStrategy # Needed for setup
-from sa.db.strategies.contact_find import FindContactsStrategy
-from sa.db.service import DatabaseService
+from schedule_core.db.models import Contact
+from schedule_core.db.dao import ContactCreate, ContactQuery
+from schedule_core.db.strategies.contact_create import CreateContactStrategy # Needed for setup
+from schedule_core.db.strategies.contact_find import FindContactsStrategy
+from schedule_core.db.service import DatabaseService
 
 # Use pytest-asyncio for async tests
 pytestmark = pytest.mark.asyncio
@@ -98,5 +98,5 @@ async def test_find_contact_no_criteria(db_service: DatabaseService, setup_conta
 
 async def test_strategy_import():
     """Placeholder to ensure the test file structure is okay before implementation."""
-    from sa.db.strategies.contact_find import FindContactsStrategy # noqa
+    from schedule_core.db.strategies.contact_find import FindContactsStrategy # noqa
     assert True 

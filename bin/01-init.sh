@@ -58,7 +58,7 @@ fi
 
 # Install dependencies using uv
 echo "Installing dependencies..."
-uv pip install -e ".[dev]"
+uv sync --all-packages --extra dev
 echo "Dependencies installed"
 
 # Check for Docker or Podman

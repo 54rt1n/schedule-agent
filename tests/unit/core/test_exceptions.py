@@ -1,7 +1,7 @@
 # tests/unit/core/test_exceptions.py
 import pytest
 
-from sa.core import exceptions
+from schedule_core.core import exceptions
 
 def test_raise_core_logic_error():
     """Test raising and catching CoreLogicError."""

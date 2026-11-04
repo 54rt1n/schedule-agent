@@ -2,11 +2,11 @@ import pytest
 from datetime import datetime
 import uuid
 
-from sa.db.service import DatabaseService
-from sa.db.strategies.get_event_by_id import GetEventByIdStrategy
-from sa.db.strategies.create_event import CreateEventStrategy # Needed for setup
-from sa.db.dao import EventCreate, EventGetById
-from sa.db.models import Event
+from schedule_core.db.service import DatabaseService
+from schedule_core.db.strategies.get_event_by_id import GetEventByIdStrategy
+from schedule_core.db.strategies.create_event import CreateEventStrategy # Needed for setup
+from schedule_core.db.dao import EventCreate, EventGetById
+from schedule_core.db.models import Event
 
 
 @pytest.mark.asyncio

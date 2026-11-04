@@ -3,13 +3,13 @@ from uuid import uuid4, UUID
 from datetime import datetime, timezone, timedelta
 
 # Fixture imports needed
-from sa.event.date_utils import DateUtils
-from sa.event.conflict_resolver import ConflictResolver
-from sa.db.strategies.get_events_in_range import GetEventsInRangeStrategy
-from sa.db.strategies.get_event_by_id import GetEventByIdStrategy
+from schedule_core.event.date_utils import DateUtils
+from schedule_core.event.conflict_resolver import ConflictResolver
+from schedule_core.db.strategies.get_events_in_range import GetEventsInRangeStrategy
+from schedule_core.db.strategies.get_event_by_id import GetEventByIdStrategy
 
-from sa.a2a.command.structured_delete import handle_structured_delete
-from sa.a2a.dto import (
+from schedule_a2a.command.structured_delete import handle_structured_delete
+from schedule_a2a.dto import (
     Message,
     Part,
     TaskStatus,
@@ -17,11 +17,11 @@ from sa.a2a.dto import (
     TaskSendParams,
     Task,
 )
-from sa.a2a.task_manager import SchedulingTaskManager
-from sa.db.dao import EventCreate, Event, EventDelete, EventGetById
-from sa.db.service import DatabaseService
-from sa.db.strategies.create_event import CreateEventStrategy
-from sa.a2a.exceptions import InvalidParamsError, InternalError, TaskNotFoundError
+from schedule_a2a.task_manager import SchedulingTaskManager
+from schedule_core.db.dao import EventCreate, Event, EventDelete, EventGetById
+from schedule_core.db.service import DatabaseService
+from schedule_core.db.strategies.create_event import CreateEventStrategy
+from schedule_a2a.exceptions import InvalidParamsError, InternalError, TaskNotFoundError
 from pydantic import ValidationError
 from unittest.mock import ANY
 

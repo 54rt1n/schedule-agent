@@ -4,11 +4,11 @@ import pytest
 import uuid
 import pytest_asyncio
 
-from sa.db.models import Contact
-from sa.db.dao import ContactCreate, ContactGetById
-from sa.db.strategies.contact_create import CreateContactStrategy
-from sa.db.strategies.contact_get_by_id import GetContactByIdStrategy
-from sa.db.service import DatabaseService
+from schedule_core.db.models import Contact
+from schedule_core.db.dao import ContactCreate, ContactGetById
+from schedule_core.db.strategies.contact_create import CreateContactStrategy
+from schedule_core.db.strategies.contact_get_by_id import GetContactByIdStrategy
+from schedule_core.db.service import DatabaseService
 
 # Use pytest-asyncio for async tests
 pytestmark = pytest.mark.asyncio

@@ -2,14 +2,14 @@ from datetime import UTC, datetime, timedelta
 import pytest
 # from sqlalchemy.ext.asyncio import AsyncSession # No longer needed directly
 
-from sa.core.logging_config import get_logger
-from sa.db.dao import EventCreate, TimeRange
-from sa.db.service import DatabaseService
-from sa.db.strategies.create_event import CreateEventStrategy
-from sa.db.strategies.get_events_in_range import GetEventsInRangeStrategy
-from sa.event.date_utils import DateUtils
+from schedule_core.core.logging_config import get_logger
+from schedule_core.db.dao import EventCreate, TimeRange
+from schedule_core.db.service import DatabaseService
+from schedule_core.db.strategies.create_event import CreateEventStrategy
+from schedule_core.db.strategies.get_events_in_range import GetEventsInRangeStrategy
+from schedule_core.event.date_utils import DateUtils
 # Need ConflictResolver for CreateEventStrategy
-from sa.event.conflict_resolver import ConflictResolver
+from schedule_core.event.conflict_resolver import ConflictResolver
 
 logger = get_logger(__name__)
 

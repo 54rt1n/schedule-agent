@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 import uuid
 
-from sa.a2a.dto import (
+from schedule_a2a.dto import (
     TaskSendParams,
     Artifact,
     Message,
@@ -13,20 +13,20 @@ from sa.a2a.dto import (
     TaskState,
     TaskStatus,
 )
-from sa.a2a.exceptions import TaskNotFoundError as A2ATaskNotFoundError, TaskNotCancelableError as A2ATaskNotCancelableError
-from sa.a2a.task_manager import SchedulingTaskManager
-from sa.core.exceptions import TaskNotFoundError as CoreTaskNotFoundError
-from sa.core.logging_config import get_logger
-from sa.db.models import A2ATask
-from sa.db.strategies.get_a2a_task_by_id import GetA2ATaskByIdStrategy
-from sa.db.strategies.save_a2a_task import SaveA2ATaskStrategy
-from sa.db.strategies.update_a2a_task_status import UpdateA2ATaskStatusStrategy
-from sa.event.exporters.ical_exporter import ICalExporter
-from sa.event.exporters.orgmode_exporter import OrgModeExporter
-from sa.nlp.nlp_processor import NLPProcessor
-from sa.event.date_utils import DateUtils
-from sa.event.conflict_resolver import ConflictResolver
-from sa.db.service import DatabaseService
+from schedule_a2a.exceptions import TaskNotFoundError as A2ATaskNotFoundError, TaskNotCancelableError as A2ATaskNotCancelableError
+from schedule_a2a.task_manager import SchedulingTaskManager
+from schedule_core.core.exceptions import TaskNotFoundError as CoreTaskNotFoundError
+from schedule_core.core.logging_config import get_logger
+from schedule_core.db.models import A2ATask
+from schedule_core.db.strategies.get_a2a_task_by_id import GetA2ATaskByIdStrategy
+from schedule_core.db.strategies.save_a2a_task import SaveA2ATaskStrategy
+from schedule_core.db.strategies.update_a2a_task_status import UpdateA2ATaskStatusStrategy
+from schedule_core.event.exporters.ical_exporter import ICalExporter
+from schedule_core.event.exporters.orgmode_exporter import OrgModeExporter
+from schedule_nlp.nlp_processor import NLPProcessor
+from schedule_core.event.date_utils import DateUtils
+from schedule_core.event.conflict_resolver import ConflictResolver
+from schedule_core.db.service import DatabaseService
 
 logger = get_logger(__name__)
 

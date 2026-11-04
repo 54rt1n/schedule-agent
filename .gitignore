@@ -146,7 +146,6 @@ schedule_agent.db-shm
 files.txt
 vendor/
 local/
-uv.lock
 .ruff_cache/
 volume/
 .cursor/

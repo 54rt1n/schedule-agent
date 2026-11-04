@@ -48,7 +48,7 @@ echo "Checking database and alembic setup..."
 # Debug the URL configuration
 echo "Debugging database URL configuration..."
 python -c "
-from sa.core.settings import Settings
+from schedule_core.core.settings import Settings
 settings = Settings()
 print(f'Async URL (from env): {settings.database_url}')
 print(f'Sync URL (for alembic): {settings.basic_database_url}')

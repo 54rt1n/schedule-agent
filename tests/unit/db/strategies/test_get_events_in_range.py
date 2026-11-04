@@ -4,12 +4,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from unittest.mock import MagicMock, AsyncMock
 import uuid
 
-from sa.core.logging_config import get_logger
-from sa.db.models import Event, ModifiedInstance, ExcludedDate, Participant
-from sa.db.service import DatabaseService
-from sa.db.strategies.get_events_in_range import GetEventsInRangeStrategy
-from sa.event.date_utils import DateUtils
-from sa.db.dao import TimeRange
+from schedule_core.core.logging_config import get_logger
+from schedule_core.db.models import Event, ModifiedInstance, ExcludedDate, Participant
+from schedule_core.db.service import DatabaseService
+from schedule_core.db.strategies.get_events_in_range import GetEventsInRangeStrategy
+from schedule_core.event.date_utils import DateUtils
+from schedule_core.db.dao import TimeRange
 
 logger = get_logger(__name__)
 

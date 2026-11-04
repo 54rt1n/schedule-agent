@@ -3,9 +3,9 @@ import uuid
 from fastapi.testclient import TestClient
 from unittest.mock import patch, AsyncMock
 
-from sa.a2a.dto import Task, TaskStatus, TaskState, Message, Part, TaskGetParams
-from sa.a2a.exceptions import TaskNotFoundError
-from sa.a2a.task_manager import SchedulingTaskManager
+from schedule_a2a.dto import Task, TaskStatus, TaskState, Message, Part, TaskGetParams
+from schedule_a2a.exceptions import TaskNotFoundError
+from schedule_a2a.task_manager import SchedulingTaskManager
 from ..conftest import build_rpc_request
 
 def test_rpc_tasks_get_not_found(client: TestClient, auth_headers_valid: dict):
@@ -46,7 +46,7 @@ def test_rpc_tasks_get_success(client: TestClient, auth_headers_valid: dict):
         history=[]
     )
 
-    with patch("sa.api.routes.rpc.handle_tasks_get", new_callable=AsyncMock) as mock_handler:
+    with patch("schedule_api.routes.rpc.handle_tasks_get", new_callable=AsyncMock) as mock_handler:
         mock_handler.return_value = expected_task
         rpc_payload = build_rpc_request("tasks/get", {"id": task_id})
         response = client.post("/api/rpc", json=rpc_payload, headers=auth_headers_valid)
@@ -79,7 +79,7 @@ def test_rpc_tasks_get_history_length(client: TestClient, auth_headers_valid: di
         status=TaskStatus(state=TaskState.COMPLETED)
     )
 
-    with patch("sa.api.routes.rpc.handle_tasks_get", new_callable=AsyncMock) as mock_handler:
+    with patch("schedule_api.routes.rpc.handle_tasks_get", new_callable=AsyncMock) as mock_handler:
         mock_handler.return_value = mock_task
         rpc_params = {"id": task_id, "historyLength": history_len}
         rpc_payload = build_rpc_request("tasks/get", rpc_params)

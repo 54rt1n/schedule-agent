@@ -1,12 +1,12 @@
 import pytest
 from datetime import UTC, datetime, timedelta
 
-from sa.db.service import DatabaseService
-from sa.db.strategies.get_events_in_range import GetEventsInRangeStrategy
-from sa.db.strategies.create_event import CreateEventStrategy # Needed for setup
-from sa.event.date_utils import DateUtils # Dependency of GetEventsInRangeStrategy
-from sa.db.dao import TimeRange, EventCreate
-from sa.db.models import Event
+from schedule_core.db.service import DatabaseService
+from schedule_core.db.strategies.get_events_in_range import GetEventsInRangeStrategy
+from schedule_core.db.strategies.create_event import CreateEventStrategy # Needed for setup
+from schedule_core.event.date_utils import DateUtils # Dependency of GetEventsInRangeStrategy
+from schedule_core.db.dao import TimeRange, EventCreate
+from schedule_core.db.models import Event
 
 
 @pytest.mark.asyncio

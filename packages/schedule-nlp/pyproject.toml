@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "schedule-nlp"
+version = "0.1.0"
+requires-python = ">=3.11,<3.14"
+license = "AGPL-3.0-or-later"
+dependencies = [
+  "schedule-core>=0.1,<0.2",
+  "openai>=1.1.1,<4",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/schedule_nlp"]
+
+[tool.uv.sources]
+schedule-core = { workspace = true }

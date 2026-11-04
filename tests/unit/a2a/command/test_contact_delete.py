@@ -7,20 +7,20 @@ import uuid
 from pydantic import ValidationError
 
 # Import necessary types and handlers
-from sa.a2a.command.structured_contact_delete import handle_structured_delete_contact
-from sa.a2a.dto import (
+from schedule_a2a.command.structured_contact_delete import handle_structured_delete_contact
+from schedule_a2a.dto import (
     Task,
     TaskState,
     TaskStatus,
     Message,
     Part,
 )
-from sa.db.dao import ContactDelete
+from schedule_core.db.dao import ContactDelete
 # Import the strategy to be patched
-from sa.db.strategies.contact_delete import DeleteContactStrategy
+from schedule_core.db.strategies.contact_delete import DeleteContactStrategy
 # Import ContactNotFoundError
-from sa.core.exceptions import DatabaseError, ContactNotFoundError
-from sa.a2a.exceptions import InvalidParamsError, InternalError
+from schedule_core.core.exceptions import DatabaseError, ContactNotFoundError
+from schedule_a2a.exceptions import InvalidParamsError, InternalError
 
 # --- Fixtures --- #
 
@@ -46,7 +46,7 @@ mock_failed_task = Task(
 # --- Test Cases --- #
 
 @pytest.mark.asyncio
-@patch("sa.a2a.command.structured_contact_delete.DeleteContactStrategy")
+@patch("schedule_a2a.command.structured_contact_delete.DeleteContactStrategy")
 async def test_handle_structured_delete_contact_success(
     mock_delete_strategy_class: MagicMock,
     mock_task_manager: AsyncMock,
@@ -90,7 +90,7 @@ async def test_handle_structured_delete_contact_success(
     mock_task_manager.fail_task.assert_not_called()
 
 @pytest.mark.asyncio
-@patch("sa.a2a.command.structured_contact_delete.DeleteContactStrategy")
+@patch("schedule_a2a.command.structured_contact_delete.DeleteContactStrategy")
 async def test_handle_structured_delete_contact_not_found(
     mock_delete_strategy_class: MagicMock,
     mock_task_manager: AsyncMock,
@@ -179,7 +179,7 @@ async def test_handle_structured_delete_contact_missing_payload(
 # --- Error Handling Tests --- #
 
 @pytest.mark.asyncio
-@patch("sa.a2a.command.structured_contact_delete.DeleteContactStrategy")
+@patch("schedule_a2a.command.structured_contact_delete.DeleteContactStrategy")
 async def test_handle_structured_delete_contact_database_error(
     mock_delete_strategy_class: MagicMock,
     mock_task_manager: AsyncMock,
@@ -219,7 +219,7 @@ async def test_handle_structured_delete_contact_database_error(
     mock_task_manager.fail_task.assert_not_called()
 
 @pytest.mark.asyncio
-@patch("sa.a2a.command.structured_contact_delete.DeleteContactStrategy")
+@patch("schedule_a2a.command.structured_contact_delete.DeleteContactStrategy")
 async def test_handle_structured_delete_contact_completion_error(
     mock_delete_strategy_class: MagicMock,
     mock_task_manager: AsyncMock,

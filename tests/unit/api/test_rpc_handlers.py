@@ -1,18 +1,17 @@
 import base64
 from datetime import datetime
-from fastapi import Depends
 import pytest
 from pydantic import BaseModel
-from unittest.mock import AsyncMock, MagicMock, patch, ANY
+from unittest.mock import AsyncMock, patch
 from typing import Any
 import uuid
 
-from sa.api.routes.rpc import (
+from schedule_api.routes.rpc import (
     handle_rpc_request,
     handle_tasks_get,
     handle_tasks_send,
 )
-from sa.a2a.dto import (
+from schedule_a2a.dto import (
     Artifact,
     CancelTaskParams,
     FileContent,
@@ -27,26 +26,20 @@ from sa.a2a.dto import (
     TaskState,
     TaskStatus,
 )
-from sa.a2a.exceptions import (
-    BaseA2AError,
+from schedule_a2a.exceptions import (
     MethodNotFoundError as A2AMethodNotFoundError,
     InvalidParamsError as A2AInvalidParamsError,
-    InternalError as A2AInternalError,
     TaskNotFoundError as A2ATaskNotFoundError,
     TaskNotCancelableError as A2ATaskNotCancelableError,
-    InvalidTaskStateError as A2AInvalidTaskStateError,
-    AgentCapabilityError as A2AAgentCapabilityError,
 )
-from sa.db.dao import EventDelete, EventQuery
-from sa.a2a.task_manager import SchedulingTaskManager
-from sa.api.routes.rpc import handle_tasks_cancel
-from sa.db.models import Event
-from sa.db.service import DatabaseService
-from sa.event.conflict_resolver import ConflictResolver
-from sa.event.date_utils import DateUtils
-from sa.event.exporters.base import CalendarExporter
-from sa.nlp.dao import LLMDateInfo, LLMFilters, LLMSchedulingParseResult
-from sa.nlp.nlp_processor import NLPProcessor
+from schedule_a2a.task_manager import SchedulingTaskManager
+from schedule_api.routes.rpc import handle_tasks_cancel
+from schedule_core.db.models import Event
+from schedule_core.db.service import DatabaseService
+from schedule_core.event.conflict_resolver import ConflictResolver
+from schedule_core.event.date_utils import DateUtils
+from schedule_core.event.exporters.base import CalendarExporter
+from schedule_nlp.nlp_processor import NLPProcessor
 
 
 # --- Unit Tests for handle_tasks_send ---
@@ -99,7 +92,7 @@ async def test_handle_tasks_send_create_success(
     )
 
     # Patch the specific command handler that handle_tasks_send will route to
-    with patch("sa.api.routes.rpc.handle_structured_create", new_callable=AsyncMock) as mock_create_handler:
+    with patch("schedule_api.routes.rpc.handle_structured_create", new_callable=AsyncMock) as mock_create_handler:
         mock_create_handler.return_value = expected_final_task
 
         # Call the main router
@@ -167,7 +160,7 @@ async def test_handle_tasks_send_create_conflict(
     )
 
     # Patch the specific command handler
-    with patch("sa.api.routes.rpc.handle_structured_create", new_callable=AsyncMock) as mock_create_handler:
+    with patch("schedule_api.routes.rpc.handle_structured_create", new_callable=AsyncMock) as mock_create_handler:
         mock_create_handler.return_value = expected_final_input_task
 
         # Call the main router
@@ -218,15 +211,6 @@ async def test_handle_tasks_send_query_success(
         intent="query_events" # Assume intent is provided or NLP detects it
     )
 
-    # Mock NLP result (needed for _dispatch_nlp_request routing)
-    mock_nlp_result = LLMSchedulingParseResult(
-        intent="query_events", # This is important for routing inside _dispatch_nlp_request
-        date_info=LLMDateInfo(start_date="today", end_date="today"),
-        entities=None,
-        filters=LLMFilters(),
-    )
-    mock_nlp_processor.process.return_value = mock_nlp_result
-
     # Mock expected final task state that the *patched handler* returns
     expected_artifact = Artifact(name="queried_events", parts=[Part(type="data", data=[{"id": "mock_id"}])]) # Dummy artifact
     expected_final_task = Task(
@@ -235,7 +219,7 @@ async def test_handle_tasks_send_query_success(
 
     # --- Action: Patch the actual NLP handler --- #
     # Corrected patch target
-    with patch("sa.api.routes.rpc.handle_nlp_request", new_callable=AsyncMock) as mock_nlp_handler:
+    with patch("schedule_api.routes.rpc.handle_nlp_request", new_callable=AsyncMock) as mock_nlp_handler:
         # Configure the patched handler to return the expected task
         mock_nlp_handler.return_value = expected_final_task
 
@@ -327,9 +311,6 @@ async def test_handle_tasks_get_not_found(mock_task_manager: SchedulingTaskManag
 @pytest.mark.asyncio
 async def test_handle_tasks_cancel_success(mock_task_manager: SchedulingTaskManager):
     """Unit test handle_tasks_cancel: Success path."""
-    if not handle_tasks_cancel:
-        pytest.skip("handle_tasks_cancel not implemented yet.")
-
     task_id = str(uuid.uuid4())
     params = CancelTaskParams(id=task_id)
 
@@ -348,9 +329,6 @@ async def test_handle_tasks_cancel_success(mock_task_manager: SchedulingTaskMana
 @pytest.mark.asyncio
 async def test_handle_tasks_cancel_not_found(mock_task_manager: SchedulingTaskManager):
     """Unit test handle_tasks_cancel: Task not found path."""
-    if not handle_tasks_cancel:
-        pytest.skip("handle_tasks_cancel not implemented yet.")
-
     task_id = str(uuid.uuid4())
     params = CancelTaskParams(id=task_id)
 
@@ -367,9 +345,6 @@ async def test_handle_tasks_cancel_not_found(mock_task_manager: SchedulingTaskMa
 @pytest.mark.asyncio
 async def test_handle_tasks_cancel_not_cancelable(mock_task_manager: SchedulingTaskManager):
     """Unit test handle_tasks_cancel: Task not cancelable path."""
-    if not handle_tasks_cancel:
-        pytest.skip("handle_tasks_cancel not implemented yet.")
-
     task_id = str(uuid.uuid4())
     params = CancelTaskParams(id=task_id)
 
@@ -408,20 +383,6 @@ async def test_handle_tasks_send_export_success(
         intent="export_calendar" # Explicit intent
     )
 
-    # Mock NLP result (needed for dispatcher routing)
-    mock_nlp_result = LLMSchedulingParseResult(
-        intent="export_calendar",
-        date_info=LLMDateInfo(),
-        filters=LLMFilters(format="ics"),
-        entities=None,
-    )
-    # mock_nlp_processor_unit.process.return_value = mock_nlp_result # Dispatcher calls process
-
-    # Mock exporter behavior (not needed if patching dispatcher)
-    # exported_content = "BEGIN:VCALENDAR..."
-    # mock_ical_exporter_unit.export.return_value = exported_content
-    # mock_ical_exporter_unit.get_mime_type.return_value = "text/calendar"
-
     # Mock TaskManager completion (returned by patched dispatcher)
     exported_content_bytes = b"BEGIN:VCALENDAR..." # Example bytes
     expected_base64_bytes = base64.b64encode(exported_content_bytes).decode("utf-8")
@@ -443,7 +404,7 @@ async def test_handle_tasks_send_export_success(
 
     # --- Action: Patch the actual NLP handler --- #
     # Corrected patch target
-    with patch("sa.api.routes.rpc.handle_nlp_request", new_callable=AsyncMock) as mock_nlp_handler:
+    with patch("schedule_api.routes.rpc.handle_nlp_request", new_callable=AsyncMock) as mock_nlp_handler:
         mock_nlp_handler.return_value = final_task # Configure mock return
 
         # Pass the mock_exporters_unit fixture to the exporters argument
@@ -500,20 +461,10 @@ async def test_handle_tasks_send_export_unsupported_format(
         intent="export_calendar" # Explicit intent
     )
 
-    # Mock NLP result (still needed for dispatcher routing logic if it checks format)
-    # mock_filters = LLMFilters(format="pdf")
-    # mock_nlp_result = LLMSchedulingParseResult(
-    #     intent="export_calendar",
-    #     date_info=LLMDateInfo(),
-    #     filters=mock_filters,
-    #     entities=None,
-    # )
-    # mock_nlp_processor_unit.process.return_value = mock_nlp_result # Dispatcher calls process
-
     # --- Action: Patch the actual NLP handler --- #
     # Expect the *handler* (or the code it calls) to raise the error
     # Corrected patch target
-    with patch("sa.api.routes.rpc.handle_nlp_request", new_callable=AsyncMock) as mock_nlp_handler:
+    with patch("schedule_api.routes.rpc.handle_nlp_request", new_callable=AsyncMock) as mock_nlp_handler:
         # Configure the patched handler to raise the expected error
         mock_nlp_handler.side_effect = A2AInvalidParamsError("Unsupported export format requested: pdf")
 
@@ -658,10 +609,10 @@ async def test_handle_rpc_request_invalid_params(
     # We don't want the actual logic of handle_tasks_send/get to run here.
     with (
         patch(
-            "sa.api.routes.rpc.handle_tasks_send", new_callable=AsyncMock
+            "schedule_api.routes.rpc.handle_tasks_send", new_callable=AsyncMock
         ) as mock_send,
         patch(
-            "sa.api.routes.rpc.handle_tasks_get", new_callable=AsyncMock
+            "schedule_api.routes.rpc.handle_tasks_get", new_callable=AsyncMock
         ) as mock_get,
     ):
         request_id = str(uuid.uuid4())
@@ -715,7 +666,7 @@ async def test_handle_rpc_request_invalid_params(
 # --- Unit Tests for handle_tasks_send (Structured Query/Delete using Wrapper) --- #
 
 @pytest.mark.asyncio
-@patch("sa.api.routes.rpc.handle_structured_query", new_callable=AsyncMock) # Patch the handler
+@patch("schedule_api.routes.rpc.handle_structured_query", new_callable=AsyncMock) # Patch the handler
 async def test_handle_tasks_send_structured_query_wrapper(
     mock_query_handler: AsyncMock,
     mock_task_manager: SchedulingTaskManager,
@@ -774,7 +725,7 @@ async def test_handle_tasks_send_structured_query_wrapper(
     assert returned_task.model_dump() == expected_final_task.model_dump()
 
 @pytest.mark.asyncio
-@patch("sa.api.routes.rpc.handle_structured_delete", new_callable=AsyncMock) # Patch the handler
+@patch("schedule_api.routes.rpc.handle_structured_delete", new_callable=AsyncMock) # Patch the handler
 async def test_handle_tasks_send_structured_delete_wrapper(
     mock_delete_handler: AsyncMock,
     mock_task_manager: SchedulingTaskManager,

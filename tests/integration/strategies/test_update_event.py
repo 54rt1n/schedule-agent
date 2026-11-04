@@ -2,14 +2,14 @@ import pytest
 from datetime import datetime
 import uuid
 
-from sa.db.service import DatabaseService
-from sa.db.strategies.update_event import UpdateEventStrategy
-from sa.db.strategies.create_event import CreateEventStrategy # Needed for setup
-from sa.db.strategies.get_event_by_id import GetEventByIdStrategy # Needed for verification
-from sa.event.date_utils import DateUtils # Dependency of UpdateEventStrategy
-from sa.event.conflict_resolver import ConflictResolver # Dependency of UpdateEventStrategy
-from sa.db.dao import EventCreate, EventUpdate, EventGetById
-from sa.db.models import Event
+from schedule_core.db.service import DatabaseService
+from schedule_core.db.strategies.update_event import UpdateEventStrategy
+from schedule_core.db.strategies.create_event import CreateEventStrategy # Needed for setup
+from schedule_core.db.strategies.get_event_by_id import GetEventByIdStrategy # Needed for verification
+from schedule_core.event.date_utils import DateUtils # Dependency of UpdateEventStrategy
+from schedule_core.event.conflict_resolver import ConflictResolver # Dependency of UpdateEventStrategy
+from schedule_core.db.dao import EventCreate, EventUpdate, EventGetById
+from schedule_core.db.models import Event
 
 
 @pytest.mark.asyncio

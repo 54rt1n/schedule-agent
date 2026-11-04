@@ -3,9 +3,9 @@ import uuid
 from fastapi.testclient import TestClient
 from unittest.mock import patch, AsyncMock
 
-from sa.a2a.dto import Task, TaskStatus, TaskState, Message, Part
-from sa.a2a.exceptions import TaskNotFoundError, TaskNotCancelableError
-from sa.a2a.task_manager import SchedulingTaskManager
+from schedule_a2a.dto import Task, TaskStatus, TaskState, Message, Part
+from schedule_a2a.exceptions import TaskNotFoundError, TaskNotCancelableError
+from schedule_a2a.task_manager import SchedulingTaskManager
 from ..conftest import build_rpc_request
 
 
@@ -24,7 +24,7 @@ def test_rpc_tasks_cancel_success(client: TestClient, auth_headers_valid: dict):
     )
 
     # Patch the handler function directly within the routes module
-    with patch("sa.api.routes.rpc.handle_tasks_cancel", new_callable=AsyncMock) as mock_handler:
+    with patch("schedule_api.routes.rpc.handle_tasks_cancel", new_callable=AsyncMock) as mock_handler:
         mock_handler.return_value = expected_canceled_task
 
         rpc_payload = build_rpc_request("tasks/cancel", {"id": task_id})
@@ -55,7 +55,7 @@ def test_rpc_tasks_cancel_not_found(client: TestClient, auth_headers_valid: dict
     """Test canceling a non-existent task ID."""
     non_existent_task_id = str(uuid.uuid4())
 
-    with patch("sa.api.routes.rpc.handle_tasks_cancel", new_callable=AsyncMock) as mock_handler:
+    with patch("schedule_api.routes.rpc.handle_tasks_cancel", new_callable=AsyncMock) as mock_handler:
         # Configure the mock to raise the specific exception the RPC handler expects
         mock_handler.side_effect = TaskNotFoundError(f"Task {non_existent_task_id} not found.")
 
@@ -81,7 +81,7 @@ def test_rpc_tasks_cancel_not_cancelable_completed(client: TestClient, auth_head
     """Test canceling a task that is already completed."""
     task_id = str(uuid.uuid4())
 
-    with patch("sa.api.routes.rpc.handle_tasks_cancel", new_callable=AsyncMock) as mock_handler:
+    with patch("schedule_api.routes.rpc.handle_tasks_cancel", new_callable=AsyncMock) as mock_handler:
         mock_handler.side_effect = TaskNotCancelableError(f"Task {task_id} is already completed.")
 
         rpc_payload = build_rpc_request("tasks/cancel", {"id": task_id})
@@ -106,7 +106,7 @@ def test_rpc_tasks_cancel_not_cancelable_failed(client: TestClient, auth_headers
     """Test canceling a task that has already failed."""
     task_id = str(uuid.uuid4())
 
-    with patch("sa.api.routes.rpc.handle_tasks_cancel", new_callable=AsyncMock) as mock_handler:
+    with patch("schedule_api.routes.rpc.handle_tasks_cancel", new_callable=AsyncMock) as mock_handler:
         mock_handler.side_effect = TaskNotCancelableError(f"Task {task_id} has already failed.")
 
         rpc_payload = build_rpc_request("tasks/cancel", {"id": task_id})

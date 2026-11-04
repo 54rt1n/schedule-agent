@@ -2,11 +2,11 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 import uuid
 
-from sa.a2a.command.structured_delete import handle_structured_delete
-from sa.a2a.dto import Task, TaskState, TaskStatus, Message, Part
-from sa.db.dao import EventDelete
-from sa.event.date_utils import DateUtils
-from sa.a2a.exceptions import InvalidParamsError, InternalError
+from schedule_a2a.command.structured_delete import handle_structured_delete
+from schedule_a2a.dto import Task, TaskState, TaskStatus, Message, Part
+from schedule_core.db.dao import EventDelete
+from schedule_core.event.date_utils import DateUtils
+from schedule_a2a.exceptions import InvalidParamsError, InternalError
 from pydantic import ValidationError # For checking cause
 
 # Mock return tasks from TaskManager
@@ -21,7 +21,7 @@ mock_failed_task = Task(
 
 
 @pytest.mark.asyncio
-@patch("sa.a2a.command.structured_delete.DeleteEventStrategy")
+@patch("schedule_a2a.command.structured_delete.DeleteEventStrategy")
 async def test_handle_structured_delete_success(
     mock_delete_strategy_class: MagicMock,
     mock_task_manager: MagicMock,
@@ -64,7 +64,7 @@ async def test_handle_structured_delete_success(
 
 
 @pytest.mark.asyncio
-@patch("sa.a2a.command.structured_delete.DeleteEventStrategy")
+@patch("schedule_a2a.command.structured_delete.DeleteEventStrategy")
 async def test_handle_structured_delete_not_found(
     mock_delete_strategy_class: MagicMock,
     mock_task_manager: MagicMock,
@@ -137,7 +137,7 @@ async def test_handle_structured_delete_invalid_payload_validation(
     mock_task_manager.complete_task.assert_not_called()
 
 @pytest.mark.asyncio
-@patch("sa.a2a.command.structured_delete.DeleteEventStrategy")
+@patch("schedule_a2a.command.structured_delete.DeleteEventStrategy")
 async def test_handle_structured_delete_db_exception(
     mock_delete_strategy_class: MagicMock,
     mock_task_manager: MagicMock,

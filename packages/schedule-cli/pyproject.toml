@@ -1,0 +1,20 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "schedule-cli"
+version = "0.1.0"
+description = "Local, stateful scheduling CLI"
+requires-python = ">=3.11"
+dependencies = ["schedule-core>=0.1,<0.2"]
+
+[project.scripts]
+schedule = "schedule_cli.main:main"
+schedule-agent = "schedule_cli.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/schedule_cli"]
+
+[tool.uv.sources]
+schedule-core = { workspace = true }

@@ -4,15 +4,14 @@ from datetime import datetime, timezone, timedelta
 import pytest
 import pytest_asyncio
 
-from sa.event.date_utils import DateUtils
-from sa.event.conflict_resolver import ConflictResolver
-from sa.db.models import Event
-from sa.db.service import DatabaseService
-from sa.db.dao import EventCreate, EventDelete, EventGetById
-from sa.mcp.handlers import schedule_delete_event
-from sa.db.strategies.create_event import CreateEventStrategy
-from sa.db.strategies.get_event_by_id import GetEventByIdStrategy
-from sa.db.strategies.get_events_in_range import GetEventsInRangeStrategy
+from schedule_core.event.date_utils import DateUtils
+from schedule_core.event.conflict_resolver import ConflictResolver
+from schedule_core.db.models import Event
+from schedule_core.db.service import DatabaseService
+from schedule_core.db.dao import EventCreate, EventDelete, EventGetById
+from schedule_core.db.strategies.create_event import CreateEventStrategy
+from schedule_core.db.strategies.get_event_by_id import GetEventByIdStrategy
+from schedule_core.db.strategies.get_events_in_range import GetEventsInRangeStrategy
 
 @pytest_asyncio.fixture(scope="function")
 async def event_to_delete(
@@ -42,7 +41,7 @@ async def event_to_delete(
 
 @pytest.mark.asyncio
 async def test_schedule_delete_event_success(
-    event_to_delete: Event,
+    mcp_call, event_to_delete: Event,
     mcp_test_db_service: DatabaseService,
 ):
     """Test successful deletion of an existing event."""
@@ -56,10 +55,7 @@ async def test_schedule_delete_event_success(
     event_id_str = str(event_to_delete.id)
 
     # Action
-    result = await schedule_delete_event(
-        db_service=mcp_test_db_service,
-        event_id=event_id_str,
-    )
+    result = await mcp_call('delete_event', {'id': event_id_str})
 
     # Assert Handler Response
     assert result is not None
@@ -73,16 +69,13 @@ async def test_schedule_delete_event_success(
 
 @pytest.mark.asyncio
 async def test_schedule_delete_event_not_found(
-    mcp_test_db_service: DatabaseService,
+    mcp_call, mcp_test_db_service: DatabaseService,
 ):
     """Test attempting to delete a non-existent event."""
     non_existent_event_id = str(uuid.uuid4())
 
     # Action
-    result = await schedule_delete_event(
-        db_service=mcp_test_db_service,
-        event_id=non_existent_event_id,
-    )
+    result = await mcp_call('delete_event', {'id': non_existent_event_id})
 
     # Assert Handler Response (failure expected)
     assert result is not None

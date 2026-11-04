@@ -5,11 +5,11 @@ import pytest
 import uuid
 from fastapi.testclient import TestClient
 
-from sa.a2a.dto import TaskSendParams, Message, Part, TaskState
-from sa.db.dao import ContactCreate, ContactGetById, ContactDelete # Import needed DAOs
-from sa.db.service import DatabaseService
-from sa.db.strategies.contact_create import CreateContactStrategy # Import create strategy
-from sa.db.strategies.contact_get_by_id import GetContactByIdStrategy # Import get strategy
+from schedule_a2a.dto import TaskSendParams, Message, Part, TaskState
+from schedule_core.db.dao import ContactCreate, ContactGetById, ContactDelete # Import needed DAOs
+from schedule_core.db.service import DatabaseService
+from schedule_core.db.strategies.contact_create import CreateContactStrategy # Import create strategy
+from schedule_core.db.strategies.contact_get_by_id import GetContactByIdStrategy # Import get strategy
 from ..conftest import build_rpc_request
 
 async def _create_db_contact(

@@ -6,14 +6,14 @@ import sqlalchemy as sa
 import pytest_asyncio
 
 # Assuming necessary imports - adjust as needed
-from sa.db.models import Contact
-from sa.db.dao import ContactCreate, ContactDelete, ContactGetById
-from sa.db.strategies.contact_create import CreateContactStrategy
-from sa.db.strategies.contact_delete import DeleteContactStrategy
-from sa.db.strategies.contact_get_by_id import GetContactByIdStrategy # For verification
-from sa.db.service import DatabaseService
+from schedule_core.db.models import Contact
+from schedule_core.db.dao import ContactCreate, ContactDelete, ContactGetById
+from schedule_core.db.strategies.contact_create import CreateContactStrategy
+from schedule_core.db.strategies.contact_delete import DeleteContactStrategy
+from schedule_core.db.strategies.contact_get_by_id import GetContactByIdStrategy # For verification
+from schedule_core.db.service import DatabaseService
 # Import necessary exceptions
-from sa.core.exceptions import DatabaseError, ContactNotFoundError
+from schedule_core.core.exceptions import DatabaseError, ContactNotFoundError
 
 # Use pytest-asyncio for async tests
 pytestmark = pytest.mark.asyncio

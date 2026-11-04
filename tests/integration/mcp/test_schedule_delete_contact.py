@@ -5,23 +5,22 @@ import pytest
 import pytest_asyncio
 
 # Function to test and setup helper
-from sa.mcp.handlers import schedule_delete_contact, schedule_create_contact
 
 # Dependencies and DB access
-from sa.db.service import DatabaseService
-from sa.db.models import Contact
-from sa.core.exceptions import ContactNotFoundError # For checking exceptions if needed
+from schedule_core.db.service import DatabaseService
+from schedule_core.db.models import Contact
+from schedule_core.core.exceptions import ContactNotFoundError # For checking exceptions if needed
 
 # --- Fixtures ---
 
 @pytest_asyncio.fixture(scope="function")
-async def contact_to_delete(mcp_test_db_service: DatabaseService) -> Contact:
+async def contact_to_delete(mcp_call, mcp_test_db_service: DatabaseService) -> Contact:
     """Fixture to create a contact to be deleted in tests."""
     params = {
         "name": "Delete Test Contact",
         "email": "delete.test@example.com",
     }
-    result = await schedule_create_contact(**params, db_service=mcp_test_db_service)
+    result = await mcp_call('create_contact', {**params})
     assert result.get("success") is True, "Fixture failed to create contact for deletion"
     contact_id_str = result["contact_id"]
     contact_id_uuid = uuid.UUID(contact_id_str) # Convert to UUID
@@ -34,7 +33,7 @@ async def contact_to_delete(mcp_test_db_service: DatabaseService) -> Contact:
 
 @pytest.mark.asyncio
 async def test_schedule_delete_contact_success(
-    mcp_test_db_service: DatabaseService,
+    mcp_call, mcp_test_db_service: DatabaseService,
     contact_to_delete: Contact,
 ):
     """Test successful deletion of an existing contact."""
@@ -47,10 +46,7 @@ async def test_schedule_delete_contact_success(
         assert pre_check_contact is not None
 
     # Action
-    result = await schedule_delete_contact(
-        db_service=mcp_test_db_service,
-        contact_id=contact_id_str,
-    )
+    result = await mcp_call('delete_contact', {'id': contact_id_str})
 
     # Assert Handler Response
     assert result is not None
@@ -64,16 +60,13 @@ async def test_schedule_delete_contact_success(
 
 @pytest.mark.asyncio
 async def test_schedule_delete_contact_not_found(
-    mcp_test_db_service: DatabaseService,
+    mcp_call, mcp_test_db_service: DatabaseService,
 ):
     """Test attempting to delete a non-existent contact."""
     non_existent_id = str(uuid.uuid4())
 
     # Action
-    result = await schedule_delete_contact(
-        db_service=mcp_test_db_service,
-        contact_id=non_existent_id,
-    )
+    result = await mcp_call('delete_contact', {'id': non_existent_id})
 
     # Assert Handler Response (failure expected)
     assert result is not None
@@ -84,18 +77,16 @@ async def test_schedule_delete_contact_not_found(
 
 @pytest.mark.asyncio
 async def test_schedule_delete_contact_invalid_id_format(
-    mcp_test_db_service: DatabaseService,
+    mcp_call, mcp_test_db_service: DatabaseService,
 ):
     """Test deleting with an invalid UUID format for contact_id."""
     invalid_id = "not-a-uuid"
 
-    result = await schedule_delete_contact(
-        db_service=mcp_test_db_service,
-        contact_id=invalid_id,
-    )
+    result = await mcp_call('delete_contact', {'id': invalid_id})
 
     # Assert Handler Response (failure expected)
     assert result is not None
     assert result.get("success") is False
     assert "error" in result
-    assert "invalid contact_id format" in result["error"].lower() 
+    assert result["problem"]["code"] == "validation"
+    assert result["problem"]["issues"][0]["path"] == "id"

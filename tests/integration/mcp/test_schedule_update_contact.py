@@ -5,17 +5,16 @@ import pytest
 import pytest_asyncio
 
 # Function to test and setup helper
-from sa.mcp.handlers import schedule_update_contact, schedule_create_contact
 
 # Dependencies and DB access
-from sa.db.service import DatabaseService
-from sa.db.models import Contact
-from sa.core.exceptions import ContactNotFoundError # For checking exceptions if needed
+from schedule_core.db.service import DatabaseService
+from schedule_core.db.models import Contact
+from schedule_core.core.exceptions import ContactNotFoundError # For checking exceptions if needed
 
 # --- Fixtures ---
 
 @pytest_asyncio.fixture(scope="function")
-async def contact_for_update(mcp_test_db_service: DatabaseService) -> Contact:
+async def contact_for_update(mcp_call, mcp_test_db_service: DatabaseService) -> Contact:
     """Fixture to create a contact to be updated in tests."""
     params = {
         "name": "Update Test Contact Original",
@@ -23,7 +22,7 @@ async def contact_for_update(mcp_test_db_service: DatabaseService) -> Contact:
         "phone": "555-0001",
         "notes": "Original Notes",
     }
-    result = await schedule_create_contact(**params, db_service=mcp_test_db_service)
+    result = await mcp_call('create_contact', {**params})
     assert result.get("success") is True, "Fixture failed to create contact for update"
     contact_id_str = result["contact_id"]
     contact_id_uuid = uuid.UUID(contact_id_str) # Convert to UUID
@@ -33,13 +32,13 @@ async def contact_for_update(mcp_test_db_service: DatabaseService) -> Contact:
         return contact
 
 @pytest_asyncio.fixture(scope="function")
-async def another_contact(mcp_test_db_service: DatabaseService) -> Contact:
+async def another_contact(mcp_call, mcp_test_db_service: DatabaseService) -> Contact:
     """Fixture to create a second contact to test email conflicts."""
     params = {
         "name": "Another Contact",
         "email": "another.contact@example.com",
     }
-    result = await schedule_create_contact(**params, db_service=mcp_test_db_service)
+    result = await mcp_call('create_contact', {**params})
     assert result.get("success") is True, "Fixture failed to create another contact"
     contact_id_str = result["contact_id"]
     contact_id_uuid = uuid.UUID(contact_id_str) # Convert to UUID
@@ -52,7 +51,7 @@ async def another_contact(mcp_test_db_service: DatabaseService) -> Contact:
 
 @pytest.mark.asyncio
 async def test_schedule_update_contact_success(
-    mcp_test_db_service: DatabaseService,
+    mcp_call, mcp_test_db_service: DatabaseService,
     contact_for_update: Contact,
 ):
     """Test successful update of an existing contact."""
@@ -64,11 +63,7 @@ async def test_schedule_update_contact_success(
         # Intentionally omitting email and notes to ensure they are not overwritten
     }
 
-    result = await schedule_update_contact(
-        db_service=mcp_test_db_service,
-        contact_id=contact_id_str,
-        update_data=update_data,
-    )
+    result = await mcp_call('update_contact', {'id': contact_id_str, 'patch': update_data})
 
     # Assert Handler Response
     assert result is not None
@@ -94,17 +89,13 @@ async def test_schedule_update_contact_success(
 
 @pytest.mark.asyncio
 async def test_schedule_update_contact_not_found(
-    mcp_test_db_service: DatabaseService,
+    mcp_call, mcp_test_db_service: DatabaseService,
 ):
     """Test attempting to update a non-existent contact."""
     non_existent_id = str(uuid.uuid4())
     update_data = {"name": "Doesn't Matter"}
 
-    result = await schedule_update_contact(
-        db_service=mcp_test_db_service,
-        contact_id=non_existent_id,
-        update_data=update_data,
-    )
+    result = await mcp_call('update_contact', {'id': non_existent_id, 'patch': update_data})
 
     # Assert Handler Response (failure expected)
     assert result is not None
@@ -115,7 +106,7 @@ async def test_schedule_update_contact_not_found(
 
 @pytest.mark.asyncio
 async def test_schedule_update_contact_invalid_data(
-    mcp_test_db_service: DatabaseService,
+    mcp_call, mcp_test_db_service: DatabaseService,
     contact_for_update: Contact,
 ):
     """Test updating a contact with invalid data (e.g., invalid email format)."""
@@ -125,11 +116,7 @@ async def test_schedule_update_contact_invalid_data(
     }
 
     # Pydantic validation happens within the handler
-    result = await schedule_update_contact(
-        db_service=mcp_test_db_service,
-        contact_id=contact_id_str,
-        update_data=update_data,
-    )
+    result = await mcp_call('update_contact', {'id': contact_id_str, 'patch': update_data})
 
     # Assert Handler Response (failure expected)
     assert result is not None
@@ -139,7 +126,7 @@ async def test_schedule_update_contact_invalid_data(
 
 @pytest.mark.asyncio
 async def test_schedule_update_contact_duplicate_email(
-    mcp_test_db_service: DatabaseService,
+    mcp_call, mcp_test_db_service: DatabaseService,
     contact_for_update: Contact,
     another_contact: Contact, # Fixture with a known email
 ):
@@ -149,11 +136,7 @@ async def test_schedule_update_contact_duplicate_email(
         "email": another_contact.email, # Use the email from the other contact
     }
 
-    result = await schedule_update_contact(
-        db_service=mcp_test_db_service,
-        contact_id=contact_id_str,
-        update_data=update_data,
-    )
+    result = await mcp_call('update_contact', {'id': contact_id_str, 'patch': update_data})
 
     # Assert Handler Response (failure expected)
     assert result is not None
@@ -164,20 +147,17 @@ async def test_schedule_update_contact_duplicate_email(
 
 @pytest.mark.asyncio
 async def test_schedule_update_contact_invalid_id_format(
-    mcp_test_db_service: DatabaseService,
+    mcp_call, mcp_test_db_service: DatabaseService,
 ):
     """Test updating with an invalid UUID format for contact_id."""
     invalid_id = "not-a-uuid"
     update_data = {"name": "Anything"}
 
-    result = await schedule_update_contact(
-        db_service=mcp_test_db_service,
-        contact_id=invalid_id,
-        update_data=update_data,
-    )
+    result = await mcp_call('update_contact', {'id': invalid_id, 'patch': update_data})
 
     # Assert Handler Response (failure expected)
     assert result is not None
     assert result.get("success") is False
     assert "error" in result
-    assert "invalid contact_id format" in result["error"].lower() 
+    assert result["problem"]["code"] == "validation"
+    assert result["problem"]["issues"][0]["path"] == "id"

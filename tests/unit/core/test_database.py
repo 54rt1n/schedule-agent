@@ -9,9 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import Field, SQLModel, select
 
-from sa.core.logging_config import get_logger
-from sa.core.settings import Settings
-from sa.db.service import DatabaseService
+from schedule_core.core.logging_config import get_logger
+from schedule_core.core.settings import Settings
+from schedule_core.db.service import DatabaseService
 
 logger = get_logger(__name__)
 

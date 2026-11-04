@@ -4,14 +4,14 @@ from uuid import uuid4
 from datetime import datetime, timezone, timedelta
 from pydantic import ValidationError
 
-from sa.a2a.command.structured_query import handle_structured_query
-from sa.a2a.dto import Message, Part, TaskState, TaskSendParams
-from sa.a2a.exceptions import InvalidParamsError
-from sa.a2a.task_manager import SchedulingTaskManager
-from sa.db.dao import EventCreate, EventQuery
-from sa.db.service import DatabaseService
-from sa.db.strategies.create_event import CreateEventStrategy
-from sa.event.date_utils import DateUtils
+from schedule_a2a.command.structured_query import handle_structured_query
+from schedule_a2a.dto import Message, Part, TaskState, TaskSendParams
+from schedule_a2a.exceptions import InvalidParamsError
+from schedule_a2a.task_manager import SchedulingTaskManager
+from schedule_core.db.dao import EventCreate, EventQuery
+from schedule_core.db.service import DatabaseService
+from schedule_core.db.strategies.create_event import CreateEventStrategy
+from schedule_core.event.date_utils import DateUtils
 
 @pytest.mark.asyncio
 async def test_handle_structured_query_success_with_relative_date(

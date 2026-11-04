@@ -2,11 +2,11 @@
 from datetime import datetime
 import pytest
 
-from sa.core.logging_config import get_logger
-from sa.db.strategies.find_events import FindEventsStrategy
-from sa.db.service import DatabaseService
-from sa.db.dao import EventQuery, EventResponse, EventCreate
-from sa.db.strategies.create_event import CreateEventStrategy
+from schedule_core.core.logging_config import get_logger
+from schedule_core.db.strategies.find_events import FindEventsStrategy
+from schedule_core.db.service import DatabaseService
+from schedule_core.db.dao import EventQuery, EventResponse, EventCreate
+from schedule_core.db.strategies.create_event import CreateEventStrategy
 
 logger = get_logger(__name__)
 

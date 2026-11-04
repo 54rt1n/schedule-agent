@@ -4,11 +4,11 @@ from unittest.mock import MagicMock, AsyncMock
 import uuid
 from datetime import datetime, UTC
 
-from sa.core.logging_config import get_logger
-from sa.db.models import Event # Import model
-from sa.db.strategies.find_events import FindEventsStrategy
-from sa.db.service import DatabaseService # For type hint
-from sa.db.dao import EventQuery, EventResponse # Import DAO
+from schedule_core.core.logging_config import get_logger
+from schedule_core.db.models import Event # Import model
+from schedule_core.db.strategies.find_events import FindEventsStrategy
+from schedule_core.db.service import DatabaseService # For type hint
+from schedule_core.db.dao import EventQuery, EventResponse # Import DAO
 
 logger = get_logger(__name__)
 

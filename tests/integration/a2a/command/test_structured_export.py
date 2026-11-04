@@ -3,22 +3,21 @@ import base64
 from uuid import uuid4
 from datetime import datetime, timezone, timedelta
 
-from sa.a2a.command.structured_export import handle_structured_export
-from sa.a2a.dto import (
+from schedule_a2a.command.structured_export import handle_structured_export
+from schedule_a2a.dto import (
     Message,
     Part,
     TaskState,
     TaskSendParams,
     FileContent,
 )
-from sa.a2a.exceptions import InvalidParamsError
-from sa.a2a.task_manager import SchedulingTaskManager
-from sa.db.dao import EventCreate
-from sa.db.service import DatabaseService
-from sa.event.date_utils import DateUtils
-from sa.event.exporters.base import CalendarExporter
-from sa.db.strategies.create_event import CreateEventStrategy
-from sa.nlp.dao import LLMDateInfo as DateInfo # For constructing input
+from schedule_a2a.exceptions import InvalidParamsError
+from schedule_a2a.task_manager import SchedulingTaskManager
+from schedule_core.db.dao import EventCreate
+from schedule_core.db.service import DatabaseService
+from schedule_core.event.date_utils import DateUtils
+from schedule_core.event.exporters.base import CalendarExporter
+from schedule_core.db.strategies.create_event import CreateEventStrategy
 
 
 @pytest.mark.asyncio
@@ -39,8 +38,8 @@ async def test_handle_structured_export_success_ics(
     # 2. Prepare export payload
     task_id = str(uuid4())
     # Export events between Oct 1 and Oct 6
-    date_info = DateInfo(start_date="2024-10-01", end_date="2024-10-06")
-    export_data = {"format": "ics", "date_info": date_info.model_dump()}
+    date_info = {"start_date": "2024-10-01", "end_date": "2024-10-06"}
+    export_data = {"format": "ics", "date_info": date_info}
     export_message = Message(role="user", parts=[Part(type="data", data=export_data)])
 
     params = TaskSendParams(id=task_id, message=export_message, intent="export_calendar")
@@ -90,8 +89,8 @@ async def test_handle_structured_export_no_events(
     """Test export when no events are in the specified range."""
     task_id = str(uuid4())
     # Export events in November (none exist)
-    date_info = DateInfo(start_date="2024-11-01", end_date="2024-11-30")
-    export_data = {"format": "ics", "date_info": date_info.model_dump()}
+    date_info = {"start_date": "2024-11-01", "end_date": "2024-11-30"}
+    export_data = {"format": "ics", "date_info": date_info}
     export_message = Message(role="user", parts=[Part(type="data", data=export_data)])
 
     params = TaskSendParams(id=task_id, message=export_message, intent="export_calendar")
@@ -125,8 +124,8 @@ async def test_handle_structured_export_unsupported_format(
 ):
     """Test requesting an unsupported export format."""
     task_id = str(uuid4())
-    date_info = DateInfo(start_date="2024-10-01", end_date="2024-10-06")
-    export_data = {"format": "unsupported_format", "date_info": date_info.model_dump()}
+    date_info = {"start_date": "2024-10-01", "end_date": "2024-10-06"}
+    export_data = {"format": "unsupported_format", "date_info": date_info}
     export_message = Message(role="user", parts=[Part(type="data", data=export_data)])
 
     params = TaskSendParams(id=task_id, message=export_message, intent="export_calendar")

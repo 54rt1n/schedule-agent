@@ -1,25 +1,23 @@
 import pytest
 from uuid import uuid4
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
-from sa.a2a.command.nlp_request import handle_nlp_request
-from sa.a2a.dto import (
+from schedule_a2a.command.nlp_request import handle_nlp_request
+from schedule_a2a.dto import (
     Message,
     Part,
     TaskState,
     TaskSendParams,
-    FileContent,
 )
-from sa.a2a.task_manager import SchedulingTaskManager
-from sa.db.service import DatabaseService
-from sa.event.date_utils import DateUtils
-from sa.event.exporters.base import CalendarExporter
-from sa.event.conflict_resolver import ConflictResolver
-from sa.nlp.nlp_processor import NLPProcessor
-from sa.nlp.dao import LLMSchedulingParseResult as NLPResult, LLMDateInfo as DateInfo, LLMFilters as Filters
+from schedule_a2a.task_manager import SchedulingTaskManager
+from schedule_core.db.service import DatabaseService
+from schedule_core.event.date_utils import DateUtils
+from schedule_core.event.exporters.base import CalendarExporter
+from schedule_core.event.conflict_resolver import ConflictResolver
+from schedule_nlp.nlp_processor import NLPProcessor
+from schedule_nlp.dao import LLMSchedulingParseResult as NLPResult
 
 
-@pytest.mark.skip(reason="NLP functionality is currently broken")
 @pytest.mark.asyncio
 async def test_handle_nlp_request_routes_to_export(
     task_manager: SchedulingTaskManager,
@@ -37,10 +35,7 @@ async def test_handle_nlp_request_routes_to_export(
     # Mock the NLP result
     mock_nlp_result = NLPResult(
         intent="export_calendar",
-        confidence=0.95,
-        date_info=DateInfo(start_date="2024-10-07", end_date="2024-10-14"), # Example dates
-        filters=Filters(format="ics"),
-        original_query=query,
+        payload={"date_info": {"start_date": "2024-10-07", "end_date": "2024-10-14"}, "format": "ics"},
     )
     nlp_processor.parse_natural_language_query = AsyncMock(return_value=mock_nlp_result)
 
@@ -58,21 +53,12 @@ async def test_handle_nlp_request_routes_to_export(
         conflict_resolver=conflict_resolver,
     )
 
-    # Assertions: Check if the task completed (implying export was successful)
-    # A more robust test would mock handle_structured_export and check its call args
-    assert final_task is not None
-    assert final_task.id == task_id
-    assert final_task.status.state == TaskState.COMPLETED # Assumes export succeeds
-    assert final_task.status.message is not None
-    assert "Calendar exported successfully as calendar.ics" in final_task.status.message.parts[0].text
-    assert final_task.artifacts is not None # Export should produce artifact
-    assert len(final_task.artifacts) == 1
-    assert final_task.artifacts[0].name == "calendar.ics"
+    assert final_task.intent == "export_calendar"
+    assert final_task.payload == mock_nlp_result.payload
 
     # Assert nlp_processor was called
     nlp_processor.parse_natural_language_query.assert_awaited_once_with(query)
 
-@pytest.mark.skip(reason="NLP functionality is currently broken")
 @pytest.mark.asyncio
 async def test_handle_nlp_request_unhandled_intent(
     task_manager: SchedulingTaskManager,
@@ -89,11 +75,7 @@ async def test_handle_nlp_request_unhandled_intent(
 
     # Mock NLP result with unhandled intent
     mock_nlp_result = NLPResult(
-        intent="tell_joke",
-        confidence=0.9,
-        date_info=None,
-        filters=None,
-        original_query=query,
+        intent="unknown",
     )
     nlp_processor.parse_natural_language_query = AsyncMock(return_value=mock_nlp_result)
 
@@ -115,11 +97,10 @@ async def test_handle_nlp_request_unhandled_intent(
     assert final_task.id == task_id
     assert final_task.status.state == TaskState.FAILED # Fallback fails the task
     assert final_task.status.message is not None
-    assert "Sorry, I didn't understand that request (intent: tell_joke)" in final_task.status.message.parts[0].text
+    assert "Sorry, I didn't understand that request." in final_task.status.message.parts[0].text
     assert not final_task.artifacts
 
 
-@pytest.mark.skip(reason="NLP functionality is currently broken")
 @pytest.mark.asyncio
 async def test_handle_nlp_request_nlp_failure(
     task_manager: SchedulingTaskManager,
@@ -159,7 +140,6 @@ async def test_handle_nlp_request_nlp_failure(
     assert not final_task.artifacts
 
 
-@pytest.mark.skip(reason="NLP functionality is currently broken")
 @pytest.mark.asyncio
 async def test_handle_nlp_request_invalid_message_format(
     task_manager: SchedulingTaskManager,

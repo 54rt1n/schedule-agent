@@ -4,14 +4,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from unittest.mock import patch, AsyncMock, MagicMock
 import uuid
 
-from sa.core.logging_config import get_logger
-from sa.event.date_utils import DateUtils
-from sa.db.models import Event, Participant
-from sa.db.dao import EventCreate
-from sa.db.service import DatabaseService
-from sa.core.exceptions import DatabaseError, ConflictError
-from sa.event.conflict_resolver import ConflictResolver
-from sa.db.strategies.create_event import CreateEventStrategy
+from schedule_core.core.logging_config import get_logger
+from schedule_core.event.date_utils import DateUtils
+from schedule_core.db.models import Event, Participant
+from schedule_core.db.dao import EventCreate
+from schedule_core.db.service import DatabaseService
+from schedule_core.core.exceptions import DatabaseError, ConflictError
+from schedule_core.event.conflict_resolver import ConflictResolver
+from schedule_core.db.strategies.create_event import CreateEventStrategy
 logger = get_logger(__name__)
 
 # --- Fixtures (Keep mocks) ---
@@ -84,7 +84,7 @@ async def test_create_event_simple(
 
     # --- Act ---
     # Patch the internal instantiation of GetEventsInRangeStrategy
-    with patch('sa.db.strategies.create_event.GetEventsInRangeStrategy') as MockGetEventsInRangeStrat:
+    with patch('schedule_core.db.strategies.create_event.GetEventsInRangeStrategy') as MockGetEventsInRangeStrat:
         # Configure the mock instance it returns for conflict check
         mock_get_events_instance = AsyncMock()
         mock_get_events_instance.execute = AsyncMock(return_value=[]) # Simulate no potential conflicts found
@@ -173,7 +173,7 @@ async def test_create_event_with_participants(
     mock_db_service.mock_session.rollback = AsyncMock()
 
     # --- Act ---
-    with patch('sa.db.strategies.create_event.GetEventsInRangeStrategy') as MockGetEventsInRangeStrat:
+    with patch('schedule_core.db.strategies.create_event.GetEventsInRangeStrategy') as MockGetEventsInRangeStrat:
         mock_get_events_instance = AsyncMock()
         mock_get_events_instance.execute = AsyncMock(return_value=[])
         MockGetEventsInRangeStrat.return_value = mock_get_events_instance
@@ -235,7 +235,7 @@ async def test_create_event_conflict_detected(
     mock_db_service.mock_session.rollback = AsyncMock()
 
     # --- Act & Assert ---
-    with patch('sa.db.strategies.create_event.GetEventsInRangeStrategy') as MockGetEventsInRangeStrat:
+    with patch('schedule_core.db.strategies.create_event.GetEventsInRangeStrategy') as MockGetEventsInRangeStrat:
         # Simulate GetEvents finding some potential conflict to pass to resolver
         mock_potential_conflict = MagicMock(spec=Event, id=uuid.uuid4())
         mock_get_events_instance = AsyncMock()
@@ -294,7 +294,7 @@ async def test_create_event_db_error(
     mock_db_service.mock_session.execute.return_value.scalar_one = MagicMock(return_value=MagicMock(spec=Event)) # Return generic mock
 
     # Patch the internal GetEvents strategy
-    with patch('sa.db.strategies.create_event.GetEventsInRangeStrategy') as MockGetEventsInRangeStrat:
+    with patch('schedule_core.db.strategies.create_event.GetEventsInRangeStrategy') as MockGetEventsInRangeStrat:
         mock_get_events_instance = AsyncMock()
         mock_get_events_instance.execute = AsyncMock(return_value=[]) # No conflicts
         MockGetEventsInRangeStrat.return_value = mock_get_events_instance

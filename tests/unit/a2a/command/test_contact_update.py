@@ -8,8 +8,8 @@ from datetime import datetime, UTC, timedelta
 from pydantic import ValidationError
 
 # Import necessary types and handlers
-from sa.a2a.command.structured_contact_update import handle_structured_update_contact
-from sa.a2a.dto import (
+from schedule_a2a.command.structured_contact_update import handle_structured_update_contact
+from schedule_a2a.dto import (
     Task,
     TaskState,
     TaskStatus,
@@ -17,13 +17,13 @@ from sa.a2a.dto import (
     Part,
     Artifact,
 )
-from sa.db.models import Contact
-from sa.db.dao import ContactUpdate
+from schedule_core.db.models import Contact
+from schedule_core.db.dao import ContactUpdate
 # Import the strategy to be patched
-from sa.db.strategies.contact_update import UpdateContactStrategy
-from sa.core.exceptions import ConflictError, DatabaseError, ContactNotFoundError
+from schedule_core.db.strategies.contact_update import UpdateContactStrategy
+from schedule_core.core.exceptions import ConflictError, DatabaseError, ContactNotFoundError
 from sqlalchemy.exc import IntegrityError
-from sa.a2a.exceptions import InvalidParamsError, InternalError
+from schedule_a2a.exceptions import InvalidParamsError, InternalError
 
 # --- Fixtures --- #
 
@@ -70,7 +70,7 @@ mock_failed_task = Task(
 # --- Test Cases --- #
 
 @pytest.mark.asyncio
-@patch("sa.a2a.command.structured_contact_update.UpdateContactStrategy")
+@patch("schedule_a2a.command.structured_contact_update.UpdateContactStrategy")
 async def test_handle_structured_update_contact_success(
     mock_update_strategy_class: MagicMock,
     mock_task_manager: AsyncMock,
@@ -216,7 +216,7 @@ async def test_handle_structured_update_contact_invalid_data(
 # --- Strategy Outcome / TaskManager Interaction Tests --- #
 
 @pytest.mark.asyncio
-@patch("sa.a2a.command.structured_contact_update.UpdateContactStrategy")
+@patch("schedule_a2a.command.structured_contact_update.UpdateContactStrategy")
 async def test_handle_structured_update_contact_not_found(
     mock_update_strategy_class: MagicMock,
     mock_task_manager: AsyncMock,
@@ -262,7 +262,7 @@ async def test_handle_structured_update_contact_not_found(
     mock_task_manager.complete_task.assert_not_called()
 
 @pytest.mark.asyncio
-@patch("sa.a2a.command.structured_contact_update.UpdateContactStrategy")
+@patch("schedule_a2a.command.structured_contact_update.UpdateContactStrategy")
 async def test_handle_structured_update_contact_conflict(
     mock_update_strategy_class: MagicMock,
     mock_task_manager: AsyncMock,
@@ -313,7 +313,7 @@ async def test_handle_structured_update_contact_conflict(
     mock_task_manager.complete_task.assert_not_called()
 
 @pytest.mark.asyncio
-@patch("sa.a2a.command.structured_contact_update.UpdateContactStrategy")
+@patch("schedule_a2a.command.structured_contact_update.UpdateContactStrategy")
 async def test_handle_structured_update_contact_database_error(
     mock_update_strategy_class: MagicMock,
     mock_task_manager: AsyncMock,
@@ -353,7 +353,7 @@ async def test_handle_structured_update_contact_database_error(
     mock_task_manager.fail_task.assert_not_called()
 
 @pytest.mark.asyncio
-@patch("sa.a2a.command.structured_contact_update.UpdateContactStrategy")
+@patch("schedule_a2a.command.structured_contact_update.UpdateContactStrategy")
 async def test_handle_structured_update_contact_completion_error(
     mock_update_strategy_class: MagicMock,
     mock_task_manager: AsyncMock,

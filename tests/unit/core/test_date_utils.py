@@ -4,10 +4,10 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from sa.core.logging_config import get_logger
-from sa.event.date_utils import DateUtils
-from sa.db.models import Event, ExcludedDate, ModifiedInstance
-from sa.core.exceptions import InvalidInputError
+from schedule_core.core.logging_config import get_logger
+from schedule_core.event.date_utils import DateUtils
+from schedule_core.db.models import Event, ExcludedDate, ModifiedInstance
+from schedule_core.core.exceptions import InvalidInputError
 
 logger = get_logger(__name__)
 

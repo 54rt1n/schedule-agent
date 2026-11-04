@@ -5,7 +5,7 @@ import pytest
 from unittest.mock import AsyncMock, ANY, patch, MagicMock
 import uuid
 
-from sa.a2a.dto import (
+from schedule_a2a.dto import (
     Task,
     TaskState,
     Message,
@@ -13,14 +13,14 @@ from sa.a2a.dto import (
     Artifact,
     TaskStatus,
 )
-from sa.a2a.exceptions import InternalError, InvalidParamsError
-from sa.a2a.command.structured_update import handle_structured_update
-from sa.core.exceptions import ConflictError
-from sa.db.dao import EventUpdate
-from sa.db.models import Event
-from sa.db.strategies.update_event import UpdateEventStrategy
-from sa.event.conflict_resolver import ConflictResolver
-from sa.event.date_utils import DateUtils
+from schedule_a2a.exceptions import InternalError, InvalidParamsError
+from schedule_a2a.command.structured_update import handle_structured_update
+from schedule_core.core.exceptions import ConflictError
+from schedule_core.db.dao import EventUpdate
+from schedule_core.db.models import Event
+from schedule_core.db.strategies.update_event import UpdateEventStrategy
+from schedule_core.event.conflict_resolver import ConflictResolver
+from schedule_core.event.date_utils import DateUtils
 
 
 @pytest.fixture
@@ -57,7 +57,7 @@ def updated_db_event(event_id: uuid.UUID) -> Event:
 # --- Test Cases --- #
 
 @pytest.mark.asyncio
-@patch("sa.a2a.command.structured_update.UpdateEventStrategy")
+@patch("schedule_a2a.command.structured_update.UpdateEventStrategy")
 async def test_handle_structured_update_success(
     mock_update_strategy_class: MagicMock,
     mock_task_manager: AsyncMock,
@@ -119,7 +119,7 @@ async def test_handle_structured_update_success(
     assert result_task.status.state == TaskState.COMPLETED
 
 @pytest.mark.asyncio
-@patch("sa.a2a.command.structured_update.UpdateEventStrategy")
+@patch("schedule_a2a.command.structured_update.UpdateEventStrategy")
 async def test_handle_structured_update_event_not_found(
     mock_update_strategy_class: MagicMock,
     mock_task_manager: AsyncMock,
@@ -173,7 +173,7 @@ async def test_handle_structured_update_event_not_found(
     assert result_task.status.state == TaskState.FAILED
 
 @pytest.mark.asyncio
-@patch("sa.a2a.command.structured_update.UpdateEventStrategy")
+@patch("schedule_a2a.command.structured_update.UpdateEventStrategy")
 async def test_handle_structured_update_conflict(
     mock_update_strategy_class: MagicMock,
     mock_task_manager: AsyncMock,
@@ -232,7 +232,7 @@ async def test_handle_structured_update_conflict(
     assert result_task.status.state == TaskState.INPUT_REQUIRED
 
 @pytest.mark.asyncio
-@patch("sa.a2a.command.structured_update.UpdateEventStrategy")
+@patch("schedule_a2a.command.structured_update.UpdateEventStrategy")
 async def test_handle_structured_update_not_implemented(
     mock_update_strategy_class: MagicMock,
     mock_task_manager: AsyncMock,
@@ -287,7 +287,7 @@ async def test_handle_structured_update_not_implemented(
     assert result_task.status.state == TaskState.FAILED
 
 @pytest.mark.asyncio
-@patch("sa.a2a.command.structured_update.UpdateEventStrategy")
+@patch("schedule_a2a.command.structured_update.UpdateEventStrategy")
 async def test_handle_structured_update_value_error(
     mock_update_strategy_class: MagicMock,
     mock_task_manager: AsyncMock,
@@ -342,7 +342,7 @@ async def test_handle_structured_update_value_error(
     assert result_task.status.state == TaskState.FAILED
 
 @pytest.mark.asyncio
-@patch("sa.a2a.command.structured_update.UpdateEventStrategy")
+@patch("schedule_a2a.command.structured_update.UpdateEventStrategy")
 async def test_handle_structured_update_validation_error(
     mock_update_strategy_class: MagicMock,
     mock_task_manager: AsyncMock,
@@ -376,7 +376,7 @@ async def test_handle_structured_update_validation_error(
     mock_task_manager.require_input_task.assert_not_called()
 
 @pytest.mark.asyncio
-@patch("sa.a2a.command.structured_update.UpdateEventStrategy")
+@patch("schedule_a2a.command.structured_update.UpdateEventStrategy")
 async def test_handle_structured_update_internal_error(
     mock_update_strategy_class: MagicMock,
     mock_task_manager: AsyncMock,

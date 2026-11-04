@@ -3,11 +3,11 @@ import uuid
 from fastapi.testclient import TestClient
 from datetime import datetime, timezone, timedelta
 
-from sa.a2a.dto import TaskSendParams, Message, Part, TaskState
-from sa.db.dao import EventCreate # Import DAO
-from sa.db.service import DatabaseService # Import for type hint
-from sa.event.date_utils import DateUtils # Import for type hint
-from sa.event.conflict_resolver import ConflictResolver # Import for type hint
+from schedule_a2a.dto import TaskSendParams, Message, Part, TaskState
+from schedule_core.db.dao import EventCreate # Import DAO
+from schedule_core.db.service import DatabaseService # Import for type hint
+from schedule_core.event.date_utils import DateUtils # Import for type hint
+from schedule_core.event.conflict_resolver import ConflictResolver # Import for type hint
 from ..conftest import build_rpc_request, create_db_event # Import new helper
 
 @pytest.mark.asyncio # Mark test as async

@@ -8,12 +8,12 @@ import pytest_asyncio
 import asyncio # For sleep
 
 # Assuming necessary imports - adjust as needed
-from sa.db.models import Contact
-from sa.db.dao import ContactCreate, ContactUpdate, ContactGetById
-from sa.db.strategies.contact_create import CreateContactStrategy
-from sa.db.strategies.contact_update import UpdateContactStrategy
-from sa.db.strategies.contact_get_by_id import GetContactByIdStrategy
-from sa.core.exceptions import ConflictError, DatabaseError, ContactNotFoundError
+from schedule_core.db.models import Contact
+from schedule_core.db.dao import ContactCreate, ContactUpdate, ContactGetById
+from schedule_core.db.strategies.contact_create import CreateContactStrategy
+from schedule_core.db.strategies.contact_update import UpdateContactStrategy
+from schedule_core.db.strategies.contact_get_by_id import GetContactByIdStrategy
+from schedule_core.core.exceptions import ConflictError, DatabaseError, ContactNotFoundError
 from sqlalchemy.exc import IntegrityError
 
 # Use pytest-asyncio for async tests

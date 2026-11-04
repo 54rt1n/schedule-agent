@@ -3,12 +3,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from unittest.mock import patch, MagicMock, AsyncMock # Added mocking imports
 import uuid
 
-from sa.core.logging_config import get_logger
-from sa.db.models import Event
-from sa.db.strategies.delete_event import DeleteEventStrategy
-from sa.db.service import DatabaseService # Needed for type hint
-from sa.core.exceptions import DatabaseError
-from sa.db.dao import EventDelete # Import DAO for input type clarity
+from schedule_core.core.logging_config import get_logger
+from schedule_core.db.models import Event
+from schedule_core.db.strategies.delete_event import DeleteEventStrategy
+from schedule_core.db.service import DatabaseService # Needed for type hint
+from schedule_core.core.exceptions import DatabaseError
+from schedule_core.db.dao import EventDelete # Import DAO for input type clarity
 
 logger = get_logger(__name__)
 

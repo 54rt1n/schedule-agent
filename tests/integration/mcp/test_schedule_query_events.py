@@ -7,36 +7,31 @@ import pytest
 import pytest_asyncio
 
 # Function to test
-from sa.mcp.handlers import schedule_query_events
 
 # DB Model and Service for setup
-from sa.db.service import DatabaseService
-from sa.db.dao import EventCreate
-from sa.db.strategies.create_event import CreateEventStrategy
-from sa.db.strategies.get_events_in_range import GetEventsInRangeStrategy
-from sa.event.date_utils import DateUtils
-from sa.event.conflict_resolver import ConflictResolver
-from sa.db.models import Event
+from schedule_core.db.service import DatabaseService
+from schedule_core.db.dao import EventCreate
+from schedule_core.db.strategies.create_event import CreateEventStrategy
+from schedule_core.db.strategies.get_events_in_range import GetEventsInRangeStrategy
+from schedule_core.event.date_utils import DateUtils
+from schedule_core.event.conflict_resolver import ConflictResolver
+from schedule_core.db.models import Event
 
 
 @pytest.mark.asyncio
 async def test_schedule_query_events_success_no_results(
-    mcp_test_db_service: DatabaseService,
+    mcp_call, mcp_test_db_service: DatabaseService,
     mcp_test_date_utils: DateUtils, # Added date_utils fixture
 ):
     """Test querying events when no events exist."""
     params = {
-        "start_time": datetime.now(timezone.utc).isoformat(),
-        "end_time": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
-        "title_contains": None,
+        "start": datetime.now(timezone.utc).isoformat(),
+        "end": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+        "title": None,
     }
 
     # Action
-    result = await schedule_query_events(
-        **params,
-        db_service=mcp_test_db_service,
-        date_utils=mcp_test_date_utils, # Pass date_utils
-    )
+    result = await mcp_call('query_schedule', {'resource': 'events', 'view': 'occurrences', **params})
 
     # Assert Handler Response
     assert result is not None
@@ -74,7 +69,7 @@ async def queried_event(mcp_test_db_service: DatabaseService, mcp_test_date_util
 
 @pytest.mark.asyncio
 async def test_schedule_query_events_success_with_results(
-    mcp_test_db_service: DatabaseService,
+    mcp_call, mcp_test_db_service: DatabaseService,
     mcp_test_date_utils: DateUtils, # Added date_utils fixture
     queried_event: tuple[Event, datetime], # Added type hint
 ):
@@ -83,18 +78,14 @@ async def test_schedule_query_events_success_with_results(
 
     params = {
         # Query range starting slightly before the event
-        "start_time": (created_event.start_time - timedelta(minutes=5)).isoformat(),
+        "start": (created_event.start_time.replace(tzinfo=timezone.utc) - timedelta(minutes=5)).isoformat(),
         # Query range ending slightly after the event
-        "end_time": (created_event.end_time + timedelta(minutes=5)).isoformat(),
-        "title_contains": "Query Test", # Filter by title
+        "end": (created_event.end_time.replace(tzinfo=timezone.utc) + timedelta(minutes=5)).isoformat(),
+        "title": "Query Test", # Filter by title
     }
 
     # Action
-    result = await schedule_query_events(
-        **params,
-        db_service=mcp_test_db_service,
-        date_utils=mcp_test_date_utils, # Pass date_utils
-    )
+    result = await mcp_call('query_schedule', {'resource': 'events', 'view': 'occurrences', **params})
 
     # Assert Handler Response
     assert result is not None
@@ -103,10 +94,10 @@ async def test_schedule_query_events_success_with_results(
     assert len(result.get("events", [])) == 1
     returned_event = result["events"][0]
     # The ID should match the created event's ID
-    assert returned_event["id"] == str(created_event.id) 
+    assert returned_event["id"] == str(created_event.id)
     assert returned_event["title"] == created_event.title
     # The returned event is an *instance*, it should not have an rrule
-    assert returned_event.get("rrule") is None 
+    assert returned_event.get("rrule") is None
 
 # TODO: Add test for querying with title_contains filter resulting in no matches
 # TODO: Add test for querying with time range filter resulting in no matches
@@ -115,7 +106,7 @@ async def test_schedule_query_events_success_with_results(
 
 @pytest.mark.asyncio
 async def test_schedule_query_events_returns_recurring_instance( # Renamed: test now expects success
-    mcp_test_db_service: DatabaseService,
+    mcp_call, mcp_test_db_service: DatabaseService,
     mcp_test_date_utils: DateUtils,
     mcp_test_conflict_resolver: ConflictResolver,
 ):
@@ -129,7 +120,7 @@ async def test_schedule_query_events_returns_recurring_instance( # Renamed: test
     yesterday_start = now.replace(hour=10, minute=0, second=0, microsecond=0) - timedelta(days=1)
     yesterday_end = yesterday_start + timedelta(hours=1)
     # Daily rule, occurs yesterday and today
-    rrule = "FREQ=DAILY;COUNT=2" 
+    rrule = "FREQ=DAILY;COUNT=2"
 
     # 1. Create the recurring event base
     event_data = EventCreate(
@@ -158,22 +149,18 @@ async def test_schedule_query_events_returns_recurring_instance( # Renamed: test
     today_query_end = today_query_start + timedelta(days=1)
 
     query_params = {
-        "start_time": today_query_start.isoformat(),
-        "end_time": today_query_end.isoformat(),
-        "title_contains": None,
+        "start": today_query_start.isoformat(),
+        "end": today_query_end.isoformat(),
+        "title": None,
     }
 
     # 3. Action: Query for events today
-    result = await schedule_query_events(
-        **query_params,
-        db_service=mcp_test_db_service,
-        date_utils=mcp_test_date_utils # Pass date_utils
-    )
+    result = await mcp_call('query_schedule', {'resource': 'events', 'view': 'occurrences', **query_params})
 
     # 4. Assert: Expecting SUCCESS (count == 1) now
     assert result is not None
     assert result.get("success") is True
-    
+
     # --- UNCOMMENTED GREEN Assertions ---
     # These assertions should pass *after* the fix is implemented.
     assert result.get("count") == 1, "Recurring instance should be found after fix"
@@ -190,21 +177,21 @@ async def test_schedule_query_events_returns_recurring_instance( # Renamed: test
         returned_start = parsed_dt.replace(tzinfo=timezone.utc)
     else:
         returned_start = parsed_dt.astimezone(timezone.utc)
-    
+
     assert returned_start.tzinfo is not None, "Parsed returned start time MUST be timezone-aware UTC"
 
     # Explicitly normalize both to UTC for robust comparison (Expected is already UTC)
     expected_instance_start_utc = expected_instance_start.astimezone(timezone.utc)
-    
+
     assert returned_start == expected_instance_start_utc, f"Returned instance start time ({returned_start}) does not match expected ({expected_instance_start_utc})"
     # Instances returned by GetEventsInRangeStrategy should have rrule=None
-    assert returned_event.get("rrule") is None, "Returned instance should not have an rrule" 
+    assert returned_event.get("rrule") is None, "Returned instance should not have an rrule"
     # --- End UNCOMMENTED GREEN Assertions ---
 
 # TODO: Add test for title_contains filtering on instances
 @pytest.mark.asyncio
 async def test_schedule_query_events_recurring_with_title_filter(
-    mcp_test_db_service: DatabaseService,
+    mcp_call, mcp_test_db_service: DatabaseService,
     mcp_test_date_utils: DateUtils,
     mcp_test_conflict_resolver: ConflictResolver,
 ):
@@ -215,7 +202,7 @@ async def test_schedule_query_events_recurring_with_title_filter(
     yesterday_end1 = yesterday_start1 + timedelta(hours=1)
     yesterday_start2 = now.replace(hour=14, minute=0, second=0, microsecond=0) - timedelta(days=1)
     yesterday_end2 = yesterday_start2 + timedelta(hours=1)
-    rrule = "FREQ=DAILY;COUNT=2" 
+    rrule = "FREQ=DAILY;COUNT=2"
 
     get_events_in_range_strategy = GetEventsInRangeStrategy(
         db_service=mcp_test_db_service,
@@ -241,13 +228,7 @@ async def test_schedule_query_events_recurring_with_title_filter(
     today_query_end = today_query_start + timedelta(days=1)
 
     # Action: Query for events today with title filter
-    result = await schedule_query_events(
-        start_time=today_query_start.isoformat(),
-        end_time=today_query_end.isoformat(),
-        title_contains="alpha", # Case-insensitive filter
-        db_service=mcp_test_db_service,
-        date_utils=mcp_test_date_utils,
-    )
+    result = await mcp_call('query_schedule', {'resource': 'events', 'view': 'occurrences', 'start': today_query_start.isoformat(), 'end': today_query_end.isoformat(), 'title': 'alpha'})
 
     # Assert: Only the 'Alpha' instance should be returned
     assert result is not None

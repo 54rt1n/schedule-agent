@@ -3,11 +3,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import uuid
 from unittest.mock import patch, MagicMock, AsyncMock
 
-from sa.core.logging_config import get_logger
-from sa.db.models import Event
-from sa.db.strategies.get_event_by_id import GetEventByIdStrategy
-from sa.db.dao import EventGetById
-from sa.db.service import DatabaseService
+from schedule_core.core.logging_config import get_logger
+from schedule_core.db.models import Event
+from schedule_core.db.strategies.get_event_by_id import GetEventByIdStrategy
+from schedule_core.db.dao import EventGetById
+from schedule_core.db.service import DatabaseService
 
 logger = get_logger(__name__)
 

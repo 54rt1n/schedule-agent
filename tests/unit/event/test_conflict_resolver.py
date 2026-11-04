@@ -6,15 +6,15 @@ from unittest.mock import patch
 
 import pytest
 
-from sa.event.conflict_resolver import ConflictResolver
-from sa.event.date_utils import DateUtils
+from schedule_core.event.conflict_resolver import ConflictResolver
+from schedule_core.event.date_utils import DateUtils
 
 # Import DB model from .models and DTO schema from .schemas
-from sa.db.models import Event
-from sa.db.dao import EventCreate
+from schedule_core.db.models import Event
+from schedule_core.db.dao import EventCreate
 
 # Mock the DatabaseService for these unit tests
-# from sa.event.db.service import EventDatabaseService # Service no longer needed
+# from schedule_core.event.db.service import EventDatabaseService # Service no longer needed
 
 
 @pytest.fixture

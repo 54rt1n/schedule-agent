@@ -30,6 +30,7 @@ WORKDIR /app
 
 # Copy dependency files, LICENSE, and README (needed for package build)
 COPY pyproject.toml uv.lock LICENSE README.md ./
+COPY packages/ ./packages/
 
 # Setup Python virtual environment using uv
 RUN python3.12 -m venv .venv && \
@@ -37,13 +38,12 @@ RUN python3.12 -m venv .venv && \
     /app/.venv/bin/pip install uv
 
 # Install dependencies (production only, not dev)
-RUN /app/.venv/bin/uv pip install --no-cache-dir .
+RUN /app/.venv/bin/uv sync --frozen --no-dev --all-packages
 
 # Copy alembic configuration
 COPY alembic.ini ./
 
 # Copy application code
-COPY sa/ ./sa/
 
 # Copy startup script and supervisor config
 COPY scripts/startup.sh scripts/supervisord.conf ./scripts/

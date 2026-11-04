@@ -8,19 +8,19 @@ from unittest.mock import AsyncMock, MagicMock
 import uuid
 from sqlmodel import SQLModel
 
-from sa.core.logging_config import get_logger
-from sa.core.settings import Settings
-from sa.db.service import DatabaseService
-from sa.event.conflict_resolver import ConflictResolver
-from sa.event.date_utils import DateUtils
-from sa.a2a.task_manager import SchedulingTaskManager
-from sa.nlp.nlp_processor import NLPProcessor
-from sa.nlp.llm_provider import LLMProvider
-from sa.event.exporters.ical_exporter import ICalExporter
-from sa.event.exporters.orgmode_exporter import OrgModeExporter
-from sa.event.exporters.base import CalendarExporter
-from sa.a2a.task_manager import Task, TaskStatus, TaskState
-from sa.nlp.dao import LLMDateInfo, LLMFilters, LLMSchedulingParseResult
+from schedule_core.core.logging_config import get_logger
+from schedule_core.core.settings import Settings
+from schedule_core.db.service import DatabaseService
+from schedule_core.event.conflict_resolver import ConflictResolver
+from schedule_core.event.date_utils import DateUtils
+from schedule_a2a.task_manager import SchedulingTaskManager
+from schedule_nlp.nlp_processor import NLPProcessor
+from schedule_nlp.llm_provider import LLMProvider
+from schedule_core.event.exporters.ical_exporter import ICalExporter
+from schedule_core.event.exporters.orgmode_exporter import OrgModeExporter
+from schedule_core.event.exporters.base import CalendarExporter
+from schedule_a2a.task_manager import Task, TaskStatus, TaskState
+from schedule_nlp.dao import LLMSchedulingParseResult
 
 logger = get_logger(__name__)
 
@@ -73,8 +73,11 @@ async def db_service(
     """Provides a DatabaseService instance using the real settings."""
     # Instantiate CoreDatabaseService correctly using engine and factory
     service = DatabaseService.from_settings(settings=settings)
-    await service.initialize()
-    return service
+    try:
+        await service.initialize()
+        yield service
+    finally:
+        await service.close()
 
 @pytest_asyncio.fixture(scope="function")
 async def task_manager(db_service: DatabaseService) -> SchedulingTaskManager:
@@ -105,7 +108,7 @@ def test_session():
 
     # Configure scalar_one_or_none() on this intermediate mock
     # By default, return a basic mock Event. Tests can override this.
-    from sa.db.models import Event # Import moved inside fixture
+    from schedule_core.db.models import Event # Import moved inside fixture
     default_mock_event = MagicMock(spec=Event)
     default_mock_event.id = uuid.uuid4()
     default_mock_event.rrule = None
@@ -186,14 +189,7 @@ def mock_db_service() -> DatabaseService:
 def mock_nlp_processor() -> AsyncMock:
     """Provides a mock NLPProcessor for unit tests."""
     mock = AsyncMock(spec=NLPProcessor)
-    # Mock the 'process' method called by the handler
-    mock.process = AsyncMock(
-        return_value=LLMSchedulingParseResult(
-            intent="unknown", 
-            date_info=LLMDateInfo(), 
-            filters=LLMFilters() # Add default filters
-        )
-    )
+    mock.parse_natural_language_query.return_value = LLMSchedulingParseResult()
     mock.date_utils = MagicMock()
     return mock
 

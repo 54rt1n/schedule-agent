@@ -8,22 +8,22 @@ import json
 from datetime import datetime, UTC
 from pydantic import ValidationError
 from typing import Any
-from sa.core.exceptions import DatabaseError
+from schedule_core.core.exceptions import DatabaseError
 
 # Import necessary types and handlers
-from sa.a2a.command.structured_contact_query import handle_structured_query_contact
-from sa.a2a.dto import (
+from schedule_a2a.command.structured_contact_query import handle_structured_query_contact
+from schedule_a2a.dto import (
     Task,
     TaskState,
     TaskStatus,
     Message,
     Part,
 )
-from sa.db.models import Contact
-from sa.db.dao import ContactQuery
+from schedule_core.db.models import Contact
+from schedule_core.db.dao import ContactQuery
 # Import the strategy to be patched
-from sa.db.strategies.contact_find import FindContactsStrategy
-from sa.a2a.exceptions import InvalidParamsError, InternalError
+from schedule_core.db.strategies.contact_find import FindContactsStrategy
+from schedule_a2a.exceptions import InvalidParamsError, InternalError
 
 # --- Fixtures --- #
 
@@ -88,7 +88,7 @@ def mock_completed_task() -> Task:
 # --- Test Cases --- #
 
 @pytest.mark.asyncio
-@patch("sa.a2a.command.structured_contact_query.FindContactsStrategy")
+@patch("schedule_a2a.command.structured_contact_query.FindContactsStrategy")
 async def test_handle_structured_query_contact_success(
     mock_find_strategy_class: MagicMock,
     mock_task_manager: AsyncMock,
@@ -147,7 +147,7 @@ async def test_handle_structured_query_contact_success(
     mock_task_manager.fail_task.assert_not_called()
 
 @pytest.mark.asyncio
-@patch("sa.a2a.command.structured_contact_query.FindContactsStrategy")
+@patch("schedule_a2a.command.structured_contact_query.FindContactsStrategy")
 async def test_handle_structured_query_contact_no_results(
     mock_find_strategy_class: MagicMock,
     mock_task_manager: AsyncMock,
@@ -193,7 +193,7 @@ async def test_handle_structured_query_contact_no_results(
     mock_task_manager.fail_task.assert_not_called()
 
 @pytest.mark.asyncio
-@patch("sa.a2a.command.structured_contact_query.FindContactsStrategy")
+@patch("schedule_a2a.command.structured_contact_query.FindContactsStrategy")
 async def test_handle_structured_query_contact_empty_payload(
     mock_find_strategy_class: MagicMock,
     mock_task_manager: AsyncMock,
@@ -268,7 +268,7 @@ async def test_handle_structured_query_contact_invalid_payload(
     mock_task_manager.complete_task.assert_not_called()
 
 @pytest.mark.asyncio
-@patch("sa.a2a.command.structured_contact_query.FindContactsStrategy")
+@patch("schedule_a2a.command.structured_contact_query.FindContactsStrategy")
 async def test_handle_structured_query_contact_database_error(
     mock_find_strategy_class: MagicMock,
     mock_task_manager: AsyncMock,
@@ -309,7 +309,7 @@ async def test_handle_structured_query_contact_database_error(
     mock_task_manager.fail_task.assert_not_called()
 
 @pytest.mark.asyncio
-@patch("sa.a2a.command.structured_contact_query.FindContactsStrategy")
+@patch("schedule_a2a.command.structured_contact_query.FindContactsStrategy")
 async def test_handle_structured_query_contact_completion_error(
     mock_find_strategy_class: MagicMock,
     mock_task_manager: AsyncMock,

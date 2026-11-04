@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, patch, ANY, MagicMock
 import uuid
 from datetime import datetime, UTC
 
-from sa.a2a.dto import (
+from schedule_a2a.dto import (
     Artifact,
     Message,
     Part,
@@ -11,11 +11,11 @@ from sa.a2a.dto import (
     TaskState,
     TaskStatus,
 )
-from sa.a2a.exceptions import InternalError, InvalidParamsError
-from sa.a2a.command.structured_contact_create import handle_structured_create_contact
-from sa.core.exceptions import DatabaseError
-from sa.db.dao import ContactCreate
-from sa.db.models import Contact
+from schedule_a2a.exceptions import InternalError, InvalidParamsError
+from schedule_a2a.command.structured_contact_create import handle_structured_create_contact
+from schedule_core.core.exceptions import DatabaseError
+from schedule_core.db.dao import ContactCreate
+from schedule_core.db.models import Contact
 from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 
@@ -62,7 +62,7 @@ mock_failed_task = Task(
 )
 
 @pytest.mark.asyncio
-@patch("sa.a2a.command.structured_contact_create.CreateContactStrategy") # Patch the strategy within the module where the handler *will* be
+@patch("schedule_a2a.command.structured_contact_create.CreateContactStrategy") # Patch the strategy within the module where the handler *will* be
 async def test_handle_structured_create_contact_success(
     mock_strategy_class: AsyncMock,
     mock_task_manager: AsyncMock,
@@ -118,7 +118,7 @@ async def test_handle_structured_create_contact_success(
 
 
 @pytest.mark.asyncio
-@patch("sa.a2a.command.structured_contact_create.CreateContactStrategy") # Patch strategy
+@patch("schedule_a2a.command.structured_contact_create.CreateContactStrategy") # Patch strategy
 async def test_handle_structured_create_contact_validation_error(
     mock_strategy_class: AsyncMock, # Include mock even if not called to satisfy patch
     mock_task_manager: AsyncMock,
@@ -153,7 +153,7 @@ async def test_handle_structured_create_contact_validation_error(
 
 
 @pytest.mark.asyncio
-@patch("sa.a2a.command.structured_contact_create.CreateContactStrategy")
+@patch("schedule_a2a.command.structured_contact_create.CreateContactStrategy")
 async def test_handle_structured_create_contact_missing_payload(
     mock_strategy_class: AsyncMock, # Patch to check it's not called
     mock_task_manager: AsyncMock,
@@ -182,7 +182,7 @@ async def test_handle_structured_create_contact_missing_payload(
 
 
 @pytest.mark.asyncio
-@patch("sa.a2a.command.structured_contact_create.CreateContactStrategy")
+@patch("schedule_a2a.command.structured_contact_create.CreateContactStrategy")
 async def test_handle_structured_create_contact_conflict_error(
     mock_strategy_class: MagicMock,
     mock_task_manager: AsyncMock,
@@ -238,7 +238,7 @@ async def test_handle_structured_create_contact_conflict_error(
 
 
 @pytest.mark.asyncio
-@patch("sa.a2a.command.structured_contact_create.CreateContactStrategy")
+@patch("schedule_a2a.command.structured_contact_create.CreateContactStrategy")
 async def test_handle_structured_create_contact_database_error(
     mock_strategy_class: AsyncMock,
     mock_task_manager: AsyncMock,
@@ -273,7 +273,7 @@ async def test_handle_structured_create_contact_database_error(
     mock_task_manager.require_input_task.assert_not_called()
 
 @pytest.mark.asyncio
-@patch("sa.a2a.command.structured_contact_create.CreateContactStrategy")
+@patch("schedule_a2a.command.structured_contact_create.CreateContactStrategy")
 async def test_handle_structured_create_contact_unexpected_error_in_completion(
     mock_strategy_class: AsyncMock,
     mock_task_manager: AsyncMock,

@@ -4,7 +4,7 @@ from pydantic import ValidationError
 from unittest.mock import AsyncMock, MagicMock, patch
 import uuid
 
-from sa.a2a.dto import (
+from schedule_a2a.dto import (
     Artifact,
     Message,
     Part,
@@ -12,15 +12,15 @@ from sa.a2a.dto import (
     TaskState,
     TaskStatus,
 )
-from sa.a2a.exceptions import InternalError, InvalidParamsError
-from sa.a2a.command.structured_create import handle_structured_create
-from sa.core.exceptions import ConflictError
-from sa.core.logging_config import get_logger
-from sa.db.dao import EventCreate
-from sa.db.models import Event
-from sa.db.strategies.create_event import CreateEventStrategy
-from sa.event.conflict_resolver import ConflictResolver
-from sa.event.date_utils import DateUtils
+from schedule_a2a.exceptions import InternalError, InvalidParamsError
+from schedule_a2a.command.structured_create import handle_structured_create
+from schedule_core.core.exceptions import ConflictError
+from schedule_core.core.logging_config import get_logger
+from schedule_core.db.dao import EventCreate
+from schedule_core.db.models import Event
+from schedule_core.db.strategies.create_event import CreateEventStrategy
+from schedule_core.event.conflict_resolver import ConflictResolver
+from schedule_core.event.date_utils import DateUtils
 
 logger = get_logger(__name__)
 
@@ -89,7 +89,7 @@ async def test_handle_structured_create_success(
     )
 
     # Mock the strategy execution
-    with patch("sa.a2a.command.structured_create.CreateEventStrategy.execute", return_value=created_db_event) as mock_execute:
+    with patch("schedule_a2a.command.structured_create.CreateEventStrategy.execute", return_value=created_db_event) as mock_execute:
 
         # Call the handler, passing real date_utils and conflict_resolver
         result_task = await handle_structured_create(
@@ -166,7 +166,7 @@ async def test_handle_structured_create_conflict(
     mock_task_manager.require_input_task.return_value = expected_return_task
 
     # Patch strategy execute ONLY
-    with patch("sa.a2a.command.structured_create.CreateEventStrategy.execute", side_effect=conflict_error) as mock_execute:
+    with patch("schedule_a2a.command.structured_create.CreateEventStrategy.execute", side_effect=conflict_error) as mock_execute:
     # No need to mock require_input_task here, we want the handler to call the real mock
 
         # Call the handler
@@ -226,7 +226,7 @@ async def test_handle_structured_create_conflict_alternative_generation_fails(
     reporting_error = ValueError("Failed to create artifact") # Simulate error during conflict handling
 
     # Patch strategy execute to raise conflict, and task manager to raise error during handling
-    with patch("sa.a2a.command.structured_create.CreateEventStrategy.execute", side_effect=conflict_error) as mock_execute, \
+    with patch("schedule_a2a.command.structured_create.CreateEventStrategy.execute", side_effect=conflict_error) as mock_execute, \
          patch.object(mock_task_manager, 'require_input_task', side_effect=reporting_error) as mock_require_input:
 
         # Call the handler and expect InternalError because require_input_task failed

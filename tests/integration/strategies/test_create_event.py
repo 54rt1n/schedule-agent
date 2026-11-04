@@ -1,14 +1,14 @@
 import pytest
 from datetime import datetime
 
-from sa.db.service import DatabaseService
-from sa.db.strategies.create_event import CreateEventStrategy
-from sa.event.date_utils import DateUtils # Dependency of CreateEventStrategy
-from sa.event.conflict_resolver import ConflictResolver # Dependency of CreateEventStrategy
+from schedule_core.db.service import DatabaseService
+from schedule_core.db.strategies.create_event import CreateEventStrategy
+from schedule_core.event.date_utils import DateUtils # Dependency of CreateEventStrategy
+from schedule_core.event.conflict_resolver import ConflictResolver # Dependency of CreateEventStrategy
 # Remove unused import as the fixture handles it
-# from sa.db.strategies.get_events_in_range import GetEventsInRangeStrategy
-from sa.db.dao import EventCreate
-from sa.db.models import Event
+# from schedule_core.db.strategies.get_events_in_range import GetEventsInRangeStrategy
+from schedule_core.db.dao import EventCreate
+from schedule_core.db.models import Event
 
 
 @pytest.mark.asyncio

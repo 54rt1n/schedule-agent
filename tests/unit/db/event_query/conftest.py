@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone, UTC
 from sqlalchemy.ext.asyncio import AsyncSession
 from unittest.mock import MagicMock, AsyncMock
 
-from sa.db.models import Event
+from schedule_core.db.models import Event
 
 
 async def create_test_event(

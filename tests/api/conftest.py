@@ -4,16 +4,16 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from typing import Dict, Any, Generator
 
-from sa.api.__main__ import main as create_app
-from sa.core.logging_config import get_logger
-from sa.core.settings import Settings
-from sa.db.dao import EventCreate
-from sa.db.models import Event
-from sa.db.service import DatabaseService
-from sa.db.strategies.create_event import CreateEventStrategy
-from sa.db.strategies.get_events_in_range import GetEventsInRangeStrategy
-from sa.event.date_utils import DateUtils
-from sa.event.conflict_resolver import ConflictResolver
+from schedule_api.__main__ import main as create_app
+from schedule_core.core.logging_config import get_logger
+from schedule_core.core.settings import Settings
+from schedule_core.db.dao import EventCreate
+from schedule_core.db.models import Event
+from schedule_core.db.service import DatabaseService
+from schedule_core.db.strategies.create_event import CreateEventStrategy
+from schedule_core.db.strategies.get_events_in_range import GetEventsInRangeStrategy
+from schedule_core.event.date_utils import DateUtils
+from schedule_core.event.conflict_resolver import ConflictResolver
 
 logger = get_logger(__name__)
 
@@ -29,7 +29,7 @@ def settings() -> Settings:
     Session-scoped as settings are generally static for a test run.
     """
     logger.info("Creating test settings...")
-    test_settings = Settings()
+    test_settings = Settings(_env_file=None)
     test_settings.database_url = "sqlite+aiosqlite:///:memory:?cache=shared"
     test_settings.api_keys = [TEST_API_KEY_VALID]
     test_settings.log_level = "WARNING"
@@ -41,7 +41,7 @@ def settings() -> Settings:
 async def test_app(settings: Settings) -> FastAPI:
     """
     Creates a real FastAPI application instance configured for testing.
-    Uses the actual app factory (sa.api.__main__.main) to ensure
+    Uses the actual app factory (schedule_api.__main__.main) to ensure
     lifespan events, middleware, dependencies, and routes are set up correctly.
     Session-scoped because app setup can be reused across tests.
     """
@@ -49,12 +49,10 @@ async def test_app(settings: Settings) -> FastAPI:
     # Pass the test settings to the app factory
     app = create_app(settings=settings)
     logger.info("Test app created.")
-    db_service : DatabaseService = app.state.db_service
-    await db_service.initialize()
     return app
 
 @pytest.fixture(scope="function")
-def app_db_service(test_app: FastAPI) -> DatabaseService:
+def app_db_service(test_app: FastAPI, client: TestClient) -> DatabaseService:
     return test_app.state.db_service
 
 @pytest.fixture(scope="function")

@@ -6,11 +6,11 @@ from sqlalchemy.exc import IntegrityError # Though we expect ConflictError
 import sqlalchemy as sa # For verification query
 
 # Assuming necessary imports - adjust as needed
-from sa.db.models import Contact
-from sa.db.dao import ContactCreate
-from sa.db.strategies.contact_create import CreateContactStrategy
-from sa.db.service import DatabaseService
-from sa.core.exceptions import DatabaseError
+from schedule_core.db.models import Contact
+from schedule_core.db.dao import ContactCreate
+from schedule_core.db.strategies.contact_create import CreateContactStrategy
+from schedule_core.db.service import DatabaseService
+from schedule_core.core.exceptions import DatabaseError
 
 # Use pytest-asyncio for async tests
 pytestmark = pytest.mark.asyncio

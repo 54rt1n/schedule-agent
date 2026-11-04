@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "schedule-mcp"
+version = "0.1.0"
+requires-python = ">=3.11,<3.14"
+license = "AGPL-3.0-or-later"
+dependencies = [
+  "schedule-core>=0.1,<0.2",
+  "mcp>=1.6,<2",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/schedule_mcp"]
+
+[tool.uv.sources]
+schedule-core = { workspace = true }

@@ -2,15 +2,15 @@ import pytest
 from uuid import uuid4
 import uuid
 
-from sa.a2a.command.structured_create import handle_structured_create
-from sa.a2a.dto import Message, Part
-from sa.a2a.task_manager import SchedulingTaskManager
-from sa.db.service import DatabaseService
-from sa.event.conflict_resolver import ConflictResolver
-from sa.event.date_utils import DateUtils
-from sa.a2a.dto import TaskSendParams, TaskState
-from sa.db.strategies.get_event_by_id import GetEventByIdStrategy
-from sa.db.dao import EventGetById
+from schedule_a2a.command.structured_create import handle_structured_create
+from schedule_a2a.dto import Message, Part
+from schedule_a2a.task_manager import SchedulingTaskManager
+from schedule_core.db.service import DatabaseService
+from schedule_core.event.conflict_resolver import ConflictResolver
+from schedule_core.event.date_utils import DateUtils
+from schedule_a2a.dto import TaskSendParams, TaskState
+from schedule_core.db.strategies.get_event_by_id import GetEventByIdStrategy
+from schedule_core.db.dao import EventGetById
 
 @pytest.mark.asyncio
 async def test_handle_structured_create_success(

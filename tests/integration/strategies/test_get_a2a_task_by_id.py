@@ -3,12 +3,12 @@ import uuid
 import json
 from datetime import UTC, datetime
 
-from sa.db.service import DatabaseService
-from sa.db.strategies.get_a2a_task_by_id import GetA2ATaskByIdStrategy
-from sa.db.strategies.save_a2a_task import SaveA2ATaskStrategy # Needed for setup
-from sa.a2a.dto import Message, Part, TaskStatus, TaskState # Added Message, Part
-from sa.db.models.a2a import A2ATask
-from sa.db.dao import GetA2ATaskById # Added DAO import
+from schedule_core.db.service import DatabaseService
+from schedule_core.db.strategies.get_a2a_task_by_id import GetA2ATaskByIdStrategy
+from schedule_core.db.strategies.save_a2a_task import SaveA2ATaskStrategy # Needed for setup
+from schedule_a2a.dto import Message, Part, TaskStatus, TaskState # Added Message, Part
+from schedule_core.db.models.a2a import A2ATask
+from schedule_core.db.dao import GetA2ATaskById # Added DAO import
 
 
 @pytest.mark.asyncio

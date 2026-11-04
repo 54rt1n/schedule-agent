@@ -1,0 +1,24 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "schedule-api"
+version = "0.1.0"
+requires-python = ">=3.11,<3.14"
+license = "AGPL-3.0-or-later"
+dependencies = [
+  "schedule-core>=0.1,<0.2",
+  "schedule-a2a>=0.1,<0.2",
+  "schedule-nlp>=0.1,<0.2",
+  "fastapi>=0.104,<0.163",
+  "uvicorn>=0.23.2,<0.55",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/schedule_api"]
+
+[tool.uv.sources]
+schedule-core = { workspace = true }
+schedule-a2a = { workspace = true }
+schedule-nlp = { workspace = true }

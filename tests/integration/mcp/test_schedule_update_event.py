@@ -5,16 +5,15 @@ from datetime import datetime, timezone, timedelta
 
 import pytest
 import pytest_asyncio
-from sa.event.date_utils import DateUtils
-from sa.event.conflict_resolver import ConflictResolver
-from sa.mcp.handlers import schedule_update_event
-from sa.db.strategies.create_event import CreateEventStrategy
-from sa.db.strategies.get_events_in_range import GetEventsInRangeStrategy
-from sa.db.strategies.get_event_by_id import GetEventByIdStrategy
-from sa.db.models import Event
-from sa.db.service import DatabaseService
-from sa.db.dao import EventCreate, EventGetById
-from sa.core.exceptions import (
+from schedule_core.event.date_utils import DateUtils
+from schedule_core.event.conflict_resolver import ConflictResolver
+from schedule_core.db.strategies.create_event import CreateEventStrategy
+from schedule_core.db.strategies.get_events_in_range import GetEventsInRangeStrategy
+from schedule_core.db.strategies.get_event_by_id import GetEventByIdStrategy
+from schedule_core.db.models import Event
+from schedule_core.db.service import DatabaseService
+from schedule_core.db.dao import EventCreate, EventGetById
+from schedule_core.core.exceptions import (
     EventNotFoundError, ConflictError, DatabaseError
 )
 
@@ -50,7 +49,7 @@ async def existing_event(
 
 @pytest.mark.asyncio
 async def test_schedule_update_event_success(
-    existing_event: Event,
+    mcp_call, existing_event: Event,
     mcp_test_db_service: DatabaseService,
     mcp_test_conflict_resolver: ConflictResolver,
     mcp_test_date_utils: DateUtils,
@@ -74,12 +73,7 @@ async def test_schedule_update_event_success(
     }
 
     # Action - Use schedule_update_event handler
-    result = await schedule_update_event(
-        db_service=mcp_test_db_service,
-        conflict_resolver=mcp_test_conflict_resolver,
-        date_utils=mcp_test_date_utils,
-        update_data=update_data
-    )
+    result = await mcp_call('update_event', {'id': update_data['id'], 'patch': {k: v for k, v in update_data.items() if k != 'id'}})
 
     # Assert Handler Response
     assert result is not None
