@@ -54,7 +54,7 @@ def register_handlers(mcp, db_service, settings):
             name=name,
             description=TOOL_DESCRIPTIONS[name],
         )
-        # FastMCP otherwise builds a permissive argument DTO and drops unknown keys
+        # MCPServer otherwise builds a permissive argument DTO and drops unknown keys
         # before the shared request validator sees them. Retain its shallow-dump API.
         tool = mcp._tool_manager.get_tool(name)
         arguments = type(

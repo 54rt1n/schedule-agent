@@ -4,18 +4,18 @@ import json
 from datetime import datetime
 
 import pytest
-from mcp.server.fastmcp import FastMCP
+from mcp.server import MCPServer
 from schedule_mcp.handlers import register_handlers
 
 
 @pytest.mark.asyncio
 async def test_midnight_through_mcp(mcp_test_db_service, mcp_test_settings):
-    server = FastMCP("midnight-contract")
+    server = MCPServer("midnight-contract")
     register_handlers(server, mcp_test_db_service, mcp_test_settings)
 
     async def call(name, arguments):
         reply = await server.call_tool(name, arguments)
-        blocks = reply[0] if isinstance(reply, tuple) else reply
+        blocks = reply.content
         value = json.loads(blocks[0].text)
         assert value["success"], value
         return value

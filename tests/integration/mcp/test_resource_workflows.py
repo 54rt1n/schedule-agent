@@ -5,11 +5,10 @@ import subprocess
 import sys
 
 import pytest
-from mcp.server.fastmcp import FastMCP
+from mcp.server import MCPServer
 from schedule_core.core.settings import Settings
 from schedule_core.db.service import DatabaseService
 from schedule_core.storage import migrate
-
 from schedule_mcp.handlers import register_handlers
 
 
@@ -23,12 +22,12 @@ async def test_agent_resource_workflows(tmp_path):
     db = DatabaseService.from_settings(settings)
     await migrate(db)
     (tmp_path / "config.json").write_text('{"default_timezone":"America/Chicago"}')
-    mcp = FastMCP("resources")
+    mcp = MCPServer("resources")
     register_handlers(mcp, db, settings)
 
     async def call(tool_name, **values):
         reply = await mcp.call_tool(tool_name, values)
-        blocks = reply[0] if isinstance(reply, tuple) else reply
+        blocks = reply.content
         return json.loads(blocks[0].text)
 
     def cli(*args):

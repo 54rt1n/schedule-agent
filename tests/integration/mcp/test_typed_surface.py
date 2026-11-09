@@ -6,12 +6,11 @@ import sys
 from datetime import UTC
 
 import pytest
-from mcp.server.fastmcp import FastMCP
+from mcp.server import MCPServer
 from schedule_core.agenda import agenda_window
 from schedule_core.agenda_contracts import AgendaRequest
 from schedule_core.core.settings import Settings
 from schedule_core.db.service import DatabaseService
-
 from schedule_mcp.handlers import register_handlers
 
 
@@ -26,11 +25,11 @@ async def test_typed_mcp_arguments_and_profile_timezone(tmp_path):
     db = DatabaseService.from_settings(settings)
     await db.initialize()
     try:
-        server = FastMCP("typed-schedule-test")
+        server = MCPServer("typed-schedule-test")
         register_handlers(server, db, settings)
         tools = await server.list_tools()
         assert len(tools) == 12
-        schemas = {t.name: t.inputSchema for t in tools}
+        schemas = {t.name: t.input_schema for t in tools}
         assert schemas["create_event"]["additionalProperties"] is False
         assert schemas["update_event"]["$defs"]["EventPatch"]["additionalProperties"] is False
         reply = await server.call_tool(
@@ -44,7 +43,7 @@ async def test_typed_mcp_arguments_and_profile_timezone(tmp_path):
                 }
             },
         )
-        content = reply[0] if isinstance(reply, tuple) else reply
+        content = reply.content
         event = json.loads(content[0].text)["event"]
         assert event["time_zone"] == "America/Chicago"
         assert event["start_time"] == "2030-01-07T16:00:00+00:00"
@@ -90,7 +89,7 @@ async def test_complete_mcp_agenda_matches_cli(tmp_path):
         log_level="ERROR",
     )
     db = DatabaseService.from_settings(settings)
-    server = FastMCP("agenda-test")
+    server = MCPServer("agenda-test")
     register_handlers(server, db, settings)
 
     async def call(name, arguments):
@@ -100,7 +99,7 @@ async def test_complete_mcp_agenda_matches_cli(tmp_path):
         if name == "create_event":
             arguments = {"event": {"kind": "timed", **arguments}}
         result = await server.call_tool(name, arguments)
-        blocks = result[0] if isinstance(result, tuple) else result
+        blocks = result.content
         return json.loads(blocks[0].text)
 
     try:
@@ -120,7 +119,7 @@ async def test_complete_mcp_agenda_matches_cli(tmp_path):
             "delete_contact",
         }
         assert not ({"import", "export", "apply_plan"} & tools.keys())
-        assert tools["query_schedule"].inputSchema["additionalProperties"] is False
+        assert tools["query_schedule"].input_schema["additionalProperties"] is False
         assert (
             await call(
                 "create_event",

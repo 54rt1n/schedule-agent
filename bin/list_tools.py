@@ -1,8 +1,9 @@
-from mcp.client.sse import sse_client
-from mcp import ClientSession
-import asyncio
-import json
 import argparse
+import asyncio
+
+from mcp import ClientSession
+from mcp.client.sse import sse_client
+
 
 async def run_sse_client(protocol, host, port):
     # Construct SSE URL from protocol, host and port
@@ -36,13 +37,13 @@ async def run_sse_client(protocol, host, port):
                 print(f"   Description: {first_desc_line}")
                 
                 # Add required parameters
-                if hasattr(tool, "inputSchema") and isinstance(tool.inputSchema, dict):
-                    required_params = tool.inputSchema.get('required', [])
+                if hasattr(tool, "input_schema") and isinstance(tool.input_schema, dict):
+                    required_params = tool.input_schema.get('required', [])
                     if required_params:
                         print(f"   Required parameters: {', '.join(required_params)}")
                 
                     # Add parameter details with their types
-                    properties = tool.inputSchema.get('properties', {})
+                    properties = tool.input_schema.get('properties', {})
                     if properties:
                         print("   Parameters:")
                         for param_name, param_info in properties.items():

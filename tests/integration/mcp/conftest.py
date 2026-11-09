@@ -2,7 +2,6 @@
 
 import pytest
 import pytest_asyncio
-
 from schedule_core.core.settings import Settings
 from schedule_core.db.service import DatabaseService
 from schedule_core.event.conflict_resolver import ConflictResolver
@@ -47,10 +46,10 @@ def mcp_test_conflict_resolver(mcp_test_date_utils: DateUtils) -> ConflictResolv
 @pytest.fixture
 def mcp_call(mcp_test_db_service, mcp_test_settings):
     """Invoke the registered MCP handler with its public request contract."""
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server import MCPServer
     from schedule_mcp.handlers import register_handlers
 
-    server = FastMCP("handler-tests")
+    server = MCPServer("handler-tests")
     register_handlers(server, mcp_test_db_service, mcp_test_settings)
 
     async def call(name, arguments):

@@ -6,7 +6,7 @@
 import sys
 from contextlib import asynccontextmanager
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server import MCPServer
 from schedule_core.core.logging_config import get_logger
 from schedule_core.core.settings import Settings
 from schedule_core.db.service import DatabaseService
@@ -15,7 +15,7 @@ from schedule_mcp.handlers import register_handlers
 
 logger = get_logger(__name__)
 
-async def setup_mcp_server(settings: Settings) -> FastMCP:
+async def setup_mcp_server(settings: Settings) -> MCPServer:
     """
     Initializes the MCP instance with lifespan manager and registers handlers.
     Services are created per-request/tool-call in handlers using the shared session factory.
@@ -27,7 +27,7 @@ async def setup_mcp_server(settings: Settings) -> FastMCP:
         await db_service.initialize()
 
         @asynccontextmanager
-        async def mcp_lifespan(app: FastMCP):
+        async def mcp_lifespan(app: MCPServer):
             """
             ASGI Lifespan: Manages DB engine and session factory via module state.
             """
@@ -59,8 +59,8 @@ async def setup_mcp_server(settings: Settings) -> FastMCP:
                 logger.info("MCP Lifespan: Shutdown complete.")
 
         # Lifespan manages engine/factory startup/shutdown and DB init
-        mcp = FastMCP("SchedulingAgentMCP", lifespan=mcp_lifespan)
-        logger.info("FastMCP server instance created.")
+        mcp = MCPServer("SchedulingAgentMCP", lifespan=mcp_lifespan)
+        logger.info("MCPServer server instance created.")
 
         register_handlers(
             mcp=mcp,

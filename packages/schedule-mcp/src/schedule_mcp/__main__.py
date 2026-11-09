@@ -4,11 +4,11 @@
 import asyncio
 import sys
 
-from schedule_core.core.logging_config import setup_logging, get_logger
-
+from mcp.server import MCPServer
+from schedule_core.core.logging_config import get_logger, setup_logging
 from schedule_core.core.settings import Settings
+
 from schedule_mcp.server import setup_mcp_server
-from mcp.server.fastmcp import FastMCP
 
 logger = get_logger(__name__)
 
@@ -17,7 +17,7 @@ async def main(settings: Settings):
     logger.info("Starting Scheduling Agent MCP...")
 
     # --- Run Async Setup Once ---
-    mcp_instance: FastMCP | None = None
+    mcp_instance: MCPServer | None = None
     try:
         mcp_instance = await setup_mcp_server(settings)
         if not mcp_instance:
@@ -42,13 +42,6 @@ async def main(settings: Settings):
         elif arg == "--host" and i + 1 < len(sys.argv):
             host = sys.argv[i + 1]
 
-    if hasattr(mcp_instance, 'settings'):
-        mcp_instance.settings.host = host
-        mcp_instance.settings.port = port
-        logger.info(f"MCP settings configured: host={host}, port={port}")
-    else:
-        logger.warning("MCP instance does not have a 'settings' attribute to configure host/port.")
-
     # --- Run Server ---
     transport = "stdio" if test_mode else "sse"
     logger.info(f"Starting SchedulingAgentMCP server on {host}:{port} using {transport} transport...")
@@ -60,7 +53,7 @@ async def main(settings: Settings):
             await mcp_instance.run_stdio_async()
         else: # sse
             logger.info("Running MCP server with sse transport...")
-            await mcp_instance.run_sse_async()
+            await mcp_instance.run_sse_async(host=host, port=port)
 
         logger.info("Server run method completed normally.")
 

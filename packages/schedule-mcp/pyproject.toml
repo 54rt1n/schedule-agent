@@ -9,7 +9,7 @@ requires-python = ">=3.11,<3.14"
 license = "AGPL-3.0-or-later"
 dependencies = [
   "schedule-core>=0.1,<0.2",
-  "mcp>=1.6,<2",
+  "mcp>=2.3,<3",
 ]
 
 [tool.hatch.build.targets.wheel]

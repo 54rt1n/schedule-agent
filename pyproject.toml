@@ -1,6 +1,6 @@
 [project]
 name = "scheduling_agent"
-version = "0.1.0"
+version = "0.1.1"
 description = "Scheduling Agent for calendar management"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
